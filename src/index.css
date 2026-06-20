@@ -1,0 +1,120 @@
+
+@import url('https://fonts.googleapis.com/css2?family=Great+Vibes&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 220 16% 96%;
+    --foreground: 0 0% 20%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 20%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 20%;
+
+    --primary: 229 80% 27%;
+    --primary-foreground: 48 88% 85%;
+
+    --secondary: 223 70% 76%;
+    --secondary-foreground: 229 80% 27%;
+
+    --muted: 220 16% 96%;
+    --muted-foreground: 215 16% 47%;
+
+    --accent: 25 100% 54%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 214 32% 91%;
+    --input: 214 32% 91%;
+    --ring: 229 80% 27%;
+
+    --radius: 0.75rem;
+
+    --sidebar-background: 229 80% 27%;
+    --sidebar-foreground: 0 0% 100%;
+    --sidebar-primary: 48 88% 85%;
+    --sidebar-primary-foreground: 229 80% 27%;
+    --sidebar-accent: 223 70% 76%;
+    --sidebar-accent-foreground: 229 80% 27%;
+    --sidebar-border: 229 70% 35%;
+    --sidebar-ring: 48 88% 85%;
+
+    --success: 142 76% 36%;
+    --warning: 48 88% 85%;
+    --info: 210 100% 50%;
+  }
+
+  .dark {
+    --background: 229 80% 10%;
+    --foreground: 0 0% 98%;
+
+    --card: 229 70% 15%;
+    --card-foreground: 0 0% 98%;
+
+    --popover: 229 70% 15%;
+    --popover-foreground: 0 0% 98%;
+
+    --primary: 223 70% 76%;
+    --primary-foreground: 229 80% 27%;
+
+    --secondary: 229 60% 25%;
+    --secondary-foreground: 0 0% 98%;
+
+    --muted: 229 60% 25%;
+    --muted-foreground: 215 20% 65%;
+
+    --accent: 25 100% 54%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 63% 31%;
+    --destructive-foreground: 0 0% 98%;
+
+    --border: 229 60% 25%;
+    --input: 229 60% 25%;
+    --ring: 223 70% 76%;
+
+    --sidebar-background: 229 80% 10%;
+    --sidebar-foreground: 0 0% 98%;
+    --sidebar-primary: 48 88% 85%;
+    --sidebar-primary-foreground: 229 80% 27%;
+    --sidebar-accent: 229 60% 25%;
+    --sidebar-accent-foreground: 0 0% 98%;
+    --sidebar-border: 229 50% 20%;
+    --sidebar-ring: 223 70% 76%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+}
+
+@layer utilities {
+  .welcome-banner-overlay {
+    background: linear-gradient(
+      90deg,
+      rgba(255, 255, 255, 0.95) 0%,
+      rgba(255, 255, 255, 0.85) 35%,
+      rgba(255, 255, 255, 0) 70%
+    );
+  }
+}
