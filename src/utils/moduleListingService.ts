@@ -51,8 +51,8 @@ export function getAllSelectableModuleFiles(modules: CourseModule[]): Selectable
   for (const module of modules) {
     // Include modules with items OR modules with _hasExtractedContent flag (from Firestore)
     const items = module.items || [];
-    const hasContentFlag = module._hasExtractedContent === true || 
-                           (module._contentLength && module._contentLength > 50);
+    const hasContentFlag = (module as any)._hasExtractedContent === true || 
+                           ((module as any)._contentLength && (module as any)._contentLength > 50);
     
     // Skip only if there are truly no items AND no content metadata
     if (items.length === 0 && !hasContentFlag) {

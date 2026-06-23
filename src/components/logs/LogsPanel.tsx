@@ -13,7 +13,7 @@ export const LogsPanel = () => {
 }));
 
 // sort newest first
-data.sort((a, b) => {
+data.sort((a: any, b: any) => {
   return b.timestamp?.toMillis?.() - a.timestamp?.toMillis?.();
 });
 

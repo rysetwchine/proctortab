@@ -1,16 +1,11 @@
 import { defineConfig, PluginOption } from "vite";
-import basicSsl from "@vitejs/plugin-basic-ssl";
 import react from "@vitejs/plugin-react";
 import path from "path";
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
   const plugins: PluginOption[] = [react()];
-  // Disabled SSL plugin for easier local development access
-  // if (mode === "development") {
-  //   plugins.push(basicSsl());
-  // }
-  const enableHttps = false; // Disabled HTTPS to avoid SSL certificate errors
+  const enableHttps = false;
 
   return {
     server: {
@@ -52,7 +47,6 @@ export default defineConfig(({ mode }) => {
       outDir: "dist",
       rollupOptions: {
         output: {
-          // Ensure chunks are large enough to avoid excessive splitting
           manualChunks: {
             pdfjs: ["pdfjs-dist"],
             tesseract: ["tesseract.js"],

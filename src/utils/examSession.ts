@@ -36,6 +36,14 @@ export function prepareExamQuestions(
 ): Question[] {
   let list = getBaseQuestionsForAssessment(assessment);
 
+  // DEFENSIVE: Drop any null/undefined or otherwise malformed question entries.
+  // This can happen when a question bank reference no longer resolves to a real
+  // question (e.g. a deleted question still referenced by an old assessment).
+  // Without this guard, a single bad entry crashes the whole exam screen.
+  list = (list || []).filter(
+    (q): q is Question => !!q && typeof q === 'object' && q.id !== undefined
+  );
+
   // CRITICAL: Normalize options at runtime so the exam/quiz UI is always consistent.
   // - Multiple-choice must have 4 options (A/B/C/D)
   // - True/False must have exactly 2 options: ["True", "False"]

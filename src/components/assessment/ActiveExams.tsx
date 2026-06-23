@@ -1,7 +1,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { useAssessment } from '@/hooks/useAssessment';
+import { useAssessment } from '@/hooks/useAssesment';
 import { Play, Pause, Trash2, CheckCircle } from 'lucide-react';
 
 export const ActiveExams = () => {

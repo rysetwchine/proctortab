@@ -1149,15 +1149,19 @@ export const CourseDetails = ({ course, onBack, onStartExam }: CourseDetailsProp
   };
 
   const detectorSummary = (a: CourseAssessment) => {
-    const usesGlobal = a.useGlobalDetectors !== false && !a.activeExamDetectors;
-    if (usesGlobal) return 'Detectors: global defaults';
+  const usesGlobal = a.useGlobalDetectors !== false && !a.activeExamDetectors;
+  let parts: string[] = [];
+  if (usesGlobal) {
+    parts = ['tab switches', 'copy/paste', 'fullscreen exit'];
+  } else {
     const r = getExamDetectorRuntime(a, settings);
-    const parts: string[] = [];
-    if (r.tabEnabled) parts.push('Tab');
-    if (r.copyPasteEnabled) parts.push('Copy/paste');
-    if (r.fullscreenExitEnabled) parts.push('Fullscreen exit');
-    return parts.length ? `This assessment: ${parts.join(' · ')}` : 'This assessment: no detectors enabled';
-  };
+    if (r.tabEnabled) parts.push('tab switches');
+    if (r.copyPasteEnabled) parts.push('copy/paste');
+    if (r.fullscreenExitEnabled) parts.push('fullscreen exit');
+  }
+  if (parts.length === 0) return 'No activity monitoring is enabled for this assessment.';
+  return `Note: your activity is monitored during this assessment — ${parts.join(', ')}.`;
+};
 
   return (
     <div
@@ -1726,82 +1730,96 @@ export const CourseDetails = ({ course, onBack, onStartExam }: CourseDetailsProp
           )}
 
           {!isProfessor && activeTab === 'exams' && (
-            <div className="space-y-6">
-              <h2 className="text-xl font-bold">Quizzes / Assessments</h2>
-              {assessments.length > 0 ? (
-                assessments.map((assessment) => {
-                  const dueOk = isExamWithinDueWindow(assessment);
-                  const startDisabled = !isStudentEnrolled || !dueOk;
-                  const sub = (assessment.submissions || []).find((s) => String(s.studentId) === String(studentId));
-                  const max = sub?.maxScore ?? assessment.maxScore ?? 100;
-                  const scoreLabel =
-                    sub?.score != null && !Number.isNaN(sub.score as any)
-                      ? `${sub.score} / ${max}`
-                      : sub
-                        ? 'Submitted'
-                        : '—';
-                  const dueLabel = assessment.dueDate ? new Date(assessment.dueDate).toLocaleString() : 'Not set';
-                  return (
-                    <Card key={assessment.id} className="mb-6 overflow-hidden border-2 border-blue-500">
-                      <CardHeader className="bg-blue-500 pb-6 text-white">
-                        <CardTitle className="flex flex-col gap-1 text-center">
-                          <span>{assessment.title}</span>
-                          <span className="text-xs font-normal uppercase tracking-wide opacity-90">
-                            {(assessment.assessmentType || 'exam') === 'quiz' ? 'Quiz' : 'Assessment'} · Max{' '}
-                            {assessment.maxScore ?? 100} pts
-                          </span>
-                        </CardTitle>
-                      </CardHeader>
-                      <CardContent className="text-center">
-                        <div className="mb-4 flex flex-wrap items-center justify-center gap-4 text-sm text-muted-foreground sm:gap-6">
-                          <div className="flex items-center gap-1">
-                            <Clock className="h-4 w-4" />
-                            <span>{assessment.duration} min</span>
-                          </div>
-                          <div className="flex items-center gap-1">
-                            <HelpCircle className="h-4 w-4" />
-                            <span>{assessment.questions ?? 0} Questions</span>
-                          </div>
-                          <div className="flex items-center gap-1">
-                            <CalendarDays className="h-4 w-4" />
-                            <span>Due: {dueLabel}</span>
-                          </div>
-                          <div className="flex items-center gap-1">
-                            <Award className="h-4 w-4" />
-                            <span>Score: {scoreLabel}</span>
-                          </div>
-                          <div className="flex items-center gap-1 max-w-md text-center">
-                            <Shield className="h-4 w-4 shrink-0 text-blue-600" />
-                            <span className="text-xs sm:text-sm">{detectorSummary(assessment)}</span>
-                          </div>
-                        </div>
-                        {!isStudentEnrolled ? (
-                          <p className="mb-3 text-sm text-destructive">You are not enrolled in this course.</p>
-                        ) : null}
-                        {isStudentEnrolled && !dueOk ? (
-                          <p className="mb-3 text-sm text-destructive">This assessment is past its due date.</p>
-                        ) : null}
-                        <Button
-                          type="button"
-                          disabled={startDisabled}
-                          onClick={() => openExamStart(assessment)}
-                          className="w-full bg-green-600 hover:bg-green-700 sm:w-64"
-                        >
-                          Start assessment
-                        </Button>
-                      </CardContent>
-                    </Card>
-                  );
-                })
-              ) : (
-                <Card>
-                  <CardContent className="p-6 text-center text-muted-foreground">
-                    No quizzes or assessments yet.
-                  </CardContent>
-                </Card>
-              )}
-            </div>
-          )}
+  <div className="space-y-6">
+    <h2 className="text-xl font-bold">Quizzes / Assessments</h2>
+    {assessments.length > 0 ? (
+      assessments.map((assessment) => {
+        const dueOk = isExamWithinDueWindow(assessment);
+        const startDisabled = !isStudentEnrolled || !dueOk;
+        const sub = (assessment.submissions || []).find((s) => String(s.studentId) === String(studentId));
+        const max = sub?.maxScore ?? assessment.maxScore ?? 100;
+        const hasScore = sub?.score != null && !Number.isNaN(sub.score as any);
+        const dueLabel = assessment.dueDate ? new Date(assessment.dueDate).toLocaleString() : 'Not set';
+
+        return (
+          <Card key={assessment.id} className="mb-6 overflow-hidden border-2 border-blue-500">
+            <CardHeader className="bg-blue-500 py-4 text-white">
+              <CardTitle className="flex flex-col gap-1 text-center">
+                <span>{assessment.title}</span>
+                <span className="text-xs font-normal uppercase tracking-wide opacity-90">
+                  {(assessment.assessmentType || 'exam') === 'quiz' ? 'Quiz' : 'Assessment'} · Max{' '}
+                  {assessment.maxScore ?? 100} pts
+                </span>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-0">
+              <div className="flex items-stretch">
+                <div className="flex-1 min-w-0 space-y-3 p-4">
+                  <span className="inline-flex items-center gap-1.5 rounded-md bg-amber-50 px-2.5 py-1 text-sm font-semibold text-amber-800">
+                    <CalendarDays className="h-4 w-4" />
+                    Due: {dueLabel}
+                  </span>
+
+                  {!isStudentEnrolled ? (
+                    <p className="text-sm text-destructive">You are not enrolled in this course.</p>
+                  ) : null}
+                  {isStudentEnrolled && !dueOk ? (
+                    <p className="text-sm text-destructive">This assessment is past its due date.</p>
+                  ) : null}
+
+                  <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
+                    <Shield className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                    <span>{detectorSummary(assessment)}</span>
+                  </p>
+
+                  <Button
+                    type="button"
+                    disabled={startDisabled}
+                    onClick={() => openExamStart(assessment)}
+                    className="w-full bg-green-600 hover:bg-green-700"
+                  >
+                    Start assessment
+                  </Button>
+                </div>
+
+                <div
+                  className={cn(
+                    'flex w-28 shrink-0 flex-col items-center justify-center gap-1 border-l px-2 py-4 text-center',
+                    hasScore ? 'bg-green-50' : 'bg-muted/50'
+                  )}
+                >
+                  <p
+                    className={cn(
+                      'text-[11px] font-medium uppercase tracking-wide',
+                      hasScore ? 'text-green-700' : 'text-muted-foreground'
+                    )}
+                  >
+                    Score
+                  </p>
+                  {hasScore ? (
+                    <p className="text-xl font-bold leading-tight text-green-700">
+                      {sub!.score} / {max}
+                    </p>
+                  ) : sub ? (
+                    <p className="text-sm font-semibold text-muted-foreground">Submitted</p>
+                  ) : (
+                    <p className="text-sm font-semibold text-muted-foreground">—</p>
+                  )}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        );
+      })
+    ) : (
+      <Card>
+        <CardContent className="p-6 text-center text-muted-foreground">
+          No quizzes or assessments yet.
+        </CardContent>
+      </Card>
+    )}
+  </div>
+)}
 
           {isProfessor && activeTab === 'assignments' && (
             <div className="space-y-6">

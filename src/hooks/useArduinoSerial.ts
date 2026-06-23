@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 export type ArduinoTabStatus = 'ACCIDENTAL' | 'SUSPICIOUS' | 'CHEATING';
 
-type SerialPortLike = SerialPort;
+type SerialPortLike = any;
 
 const encodeLine = (line: string) => new TextEncoder().encode(line + '\n');
 

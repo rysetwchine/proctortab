@@ -949,8 +949,11 @@ export function resolveAssessmentQuestionBank(
   questionItems: Question[] | undefined,
   fallbackCount: number
 ): Question[] {
-  if (questionItems && questionItems.length > 0) {
-    return questionItems.map((q, i) => ({ ...q, id: q.id ?? i + 1 }));
+  const cleaned = (questionItems || []).filter(
+    (q): q is Question => !!q && typeof q === 'object' && q.id !== undefined
+  );
+  if (cleaned.length > 0) {
+    return cleaned.map((q, i) => ({ ...q, id: q.id ?? i + 1 }));
   }
   return examQuestions.slice(0, Math.max(fallbackCount, 1));
 }

@@ -650,7 +650,7 @@ export const SessionProvider = ({ children }: { children: ReactNode }) => {
 
   const addModuleItem = (courseId: string, moduleId: string, item: ModuleItem | Omit<ModuleItem, 'id'>) => {
     // Support both items with and without ID
-    const newItem: ModuleItem = item.id 
+    const newItem: ModuleItem = 'id' in item 
       ? (item as ModuleItem)
       : { ...item, id: Date.now().toString() };
     let moduleToSync: CourseModule | undefined;

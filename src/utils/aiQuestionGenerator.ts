@@ -42,7 +42,7 @@ export async function generateAIQuestions(
     throw new Error('Topic is required');
   }
 
-  const apiKey = import.meta.env.VITE_CLAUDE_API_KEY;
+  const apiKey = (import.meta as any).env?.VITE_CLAUDE_API_KEY;
   if (!apiKey) {
     console.warn('[AI] VITE_CLAUDE_API_KEY not configured, using fallback generation');
     return generateFallbackQuestions(params);
@@ -287,6 +287,7 @@ function parseAIResponse(
           difficulty,
           type,
           topic,
+          options: item.options || [],
           explanation: item.explanation || undefined,
         };
 
@@ -1217,6 +1218,7 @@ function fillTemplate(
     correctAnswer,
     difficulty,
     topic,
+    options: [],
     explanation,
     type,
   };

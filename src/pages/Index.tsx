@@ -38,6 +38,7 @@ import {
   saveCourseExamResultToFirestore,
 } from '@/utils/examResultsFirestore';
 import { mergeAssessmentSubmission } from '@/utils/examSession';
+import { StudentAssessmentsPanel } from '@/components/student/StudentAssessmentsPanel';
 
 type AuthScreen = 'login' | 'register';
 type ExamState = 'none' | 'instructions' | 'active' | 'completed';
@@ -263,6 +264,16 @@ const handleLogout = async () => {
     />
   )}
 
+  {activeTab === 'assessments' && user?.role === 'student' && (
+    <StudentAssessmentsPanel
+      onNavigate={setActiveTab}
+      onStartCourseExam={(ctx) => {
+        setCourseExamLaunch(ctx);
+        setExamState('instructions');
+      }}
+    />
+  )}
+
   {activeTab === 'my-courses' && user?.role === 'student' && (
     <MyCoursesPanel
       onStartCourseExam={(ctx) => {
@@ -279,8 +290,6 @@ const handleLogout = async () => {
   {activeTab === 'completed-exams' && user?.role === 'student' && (
     <CompletedExamsPanel onNavigate={setActiveTab} />
   )}
-
-
 
   {/* Shared Routes */}
   {activeTab === 'settings' && <SettingsPanel />}

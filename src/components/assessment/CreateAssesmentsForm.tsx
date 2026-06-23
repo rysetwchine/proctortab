@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { useAssessment } from '@/hooks/useAssessment';
+import { useAssessment } from '@/hooks/useAssesment';
 import { Plus, X } from 'lucide-react';
 import { Question } from '@/types';
 
@@ -18,11 +18,11 @@ export const CreateAssessmentForm = ({ onClose }: CreateAssessmentFormProps) => 
   const [duration, setDuration] = useState(30);
   const [dueDate, setDueDate] = useState('');
   const [questions, setQuestions] = useState<Omit<Question, 'id'>[]>([
-  { question: '', options: ['', '', '', ''], correctAnswer: 0 },
+  { question: '', options: ['', '', '', ''], correctAnswer: '' },
 ]);
 
   const addQuestion = () => {
-    setQuestions([...questions, { question: '', options: ['', '', '', ''], correctAnswer: 0 }]);
+    setQuestions([...questions, { question: '', options: ['', '', '', ''], correctAnswer: '' }]);
   };
 
   const removeQuestion = (index: number) => {
@@ -61,10 +61,8 @@ export const CreateAssessmentForm = ({ onClose }: CreateAssessmentFormProps) => 
 addAssessment({
   title,
   duration,
-  dueDate,
   questions: validQuestions.map((q, idx) => ({ ...q, id: idx + 1 })),
   status: 'draft',
-  createdAt: new Date().toISOString(),
 });
 
     alert('Assessment created successfully!');

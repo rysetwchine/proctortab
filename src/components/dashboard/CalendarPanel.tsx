@@ -4,6 +4,7 @@ import { collection, onSnapshot } from "firebase/firestore";
 import { db } from "@/firebase";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useSession } from "@/hooks/useSession";
 import { useAuth } from "@/hooks/useAuth";
 import { resolveEnrollmentStudentId } from "@/utils/studentEnrollmentId";
@@ -27,6 +28,21 @@ export const CalendarPanel = () => {
   const [assessments, setAssessments] = useState<any[]>([]);
   const [selectedAttendanceEvent, setSelectedAttendanceEvent] = useState<AttendanceCalendarEvent | null>(null);
   const [isDetailsDialogOpen, setIsDetailsDialogOpen] = useState(false);
+
+  // Navigate to the course detail view (Courses > Assessments tab) for a given due-date item.
+  // Course-based assessments have an id shaped like `course-${courseId}-${assessmentId}`.
+  const goToCourseForDueDate = (item: any) => {
+    const rawId = String(item?.id || "");
+    const match = rawId.match(/^course-(.+)-[^-]+$/);
+    const courseId = match ? match[1] : null;
+
+    if (courseId) {
+      window.location.hash = `#course=${courseId}`;
+    }
+    window.dispatchEvent(
+      new CustomEvent('navigate-to-tab', { detail: { tab: 'my-courses' } })
+    );
+  };
 
   // Fetch attendance records for the logged-in student
   const { attendanceEvents } = useAttendanceCalendar(isProfessor ? "" : studentId);
@@ -128,26 +144,30 @@ export const CalendarPanel = () => {
                 })}
               </h2>
 
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1.5">
                 <Button
                   type="button"
                   variant="outline"
-                  size="sm"
+                  size="icon"
+                  className="h-7 w-7"
+                  aria-label="Previous month"
                   onClick={() =>
                     setCurrentDate((d) => new Date(d.getFullYear(), d.getMonth() - 1, 1))
                   }
                 >
-                  Prev
+                  <ChevronLeft className="w-4 h-4" />
                 </Button>
                 <Button
                   type="button"
                   variant="outline"
-                  size="sm"
+                  size="icon"
+                  className="h-7 w-7"
+                  aria-label="Next month"
                   onClick={() =>
                     setCurrentDate((d) => new Date(d.getFullYear(), d.getMonth() + 1, 1))
                   }
                 >
-                  Next
+                  <ChevronRight className="w-4 h-4" />
                 </Button>
               </div>
             </div>
@@ -207,19 +227,23 @@ export const CalendarPanel = () => {
                   >
                     <p className="text-xs font-bold">{day}</p>
 
-                    {/* Due dates (same as before) */}
+                    {/* Due dates - clickable, navigates to the course's Assessments tab */}
                     {dayDueItems.slice(0, 3).map((item, idx) => {
                       const isQuiz = String(item.assessmentType || "").toLowerCase() === "quiz";
                       return (
-                        <div
+                        <button
                           key={`due-${idx}`}
-                          className={`text-[10px] mt-1 p-1 rounded leading-snug ${
-                            isQuiz ? "bg-emerald-100" : "bg-blue-100"
+                          type="button"
+                          onClick={() => goToCourseForDueDate(item)}
+                          className={`w-full text-left text-[10px] mt-1 p-1 rounded leading-snug transition-colors ${
+                            isQuiz
+                              ? "bg-emerald-100 hover:bg-emerald-200"
+                              : "bg-blue-100 hover:bg-blue-200"
                           }`}
                           title={item.title}
                         >
                           {item.title}
-                        </div>
+                        </button>
                       );
                     })}
 
@@ -255,6 +279,24 @@ export const CalendarPanel = () => {
                 );
               })}
             </div>
+
+            {/* Legend */}
+            <div className="flex flex-wrap items-center gap-4 pt-2">
+              <div className="flex items-center gap-1.5">
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 flex-shrink-0" />
+                <span className="text-xs text-muted-foreground">Quiz</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="w-2.5 h-2.5 rounded-full bg-blue-400 flex-shrink-0" />
+                <span className="text-xs text-muted-foreground">Exam</span>
+              </div>
+              {!isProfessor && (
+                <div className="flex items-center gap-1.5">
+                  <span className="w-2.5 h-2.5 rounded-full bg-green-500 flex-shrink-0" />
+                  <span className="text-xs text-muted-foreground">Attendance</span>
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Student-only: keep the "Due Dates" and "Attendance Records" info in the same page (no tabs/buttons). */}
@@ -270,13 +312,18 @@ export const CalendarPanel = () => {
                       .slice()
                       .sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime())
                       .map((item, index) => (
-                        <div key={index} className="border rounded-lg p-4 bg-card">
+                        <button
+                          key={index}
+                          type="button"
+                          onClick={() => goToCourseForDueDate(item)}
+                          className="w-full text-left border rounded-lg p-4 bg-card hover:bg-muted/50 hover:border-primary/30 transition-colors"
+                        >
                           <h4 className="font-bold text-base">{item.title}</h4>
                           <p className="text-sm text-muted-foreground mt-1">
                             Due date: {item.dueDate}
                           </p>
                           <p className="text-sm mt-2">{item.subject || "No subject"}</p>
-                        </div>
+                        </button>
                       ))}
                   </div>
                 )}

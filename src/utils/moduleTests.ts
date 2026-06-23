@@ -269,6 +269,7 @@ export async function runTests(): Promise<void> {
       type: 'identification',
       topic: 'Binary Trees',
       explanation: 'This is the definition of a complete binary tree.',
+      options: [],
     };
 
     assertEqual(question.type, 'identification', 'Question type should be identification');
@@ -287,6 +288,7 @@ export async function runTests(): Promise<void> {
         difficulty,
         type: 'multiple-choice',
         topic: 'Test',
+        options: [],
       };
 
       assertEqual(question.difficulty, difficulty, `Should support difficulty: ${difficulty}`);

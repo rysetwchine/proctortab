@@ -19,7 +19,7 @@ export const ActiveExamsPanel = () => {
     const unsub = onSnapshot(collection(db, 'exam_sessions'), (snapshot) => {
       const active = snapshot.docs
         .map((d) => ({ id: d.id, ...d.data() }))
-        .filter((s: { status?: string }) => s.status === 'active');
+        .filter((s: any) => s.status === 'active');
       setLiveJoinSessions(active as { id: string; title?: string; code?: string; status?: string }[]);
     });
     return () => unsub();

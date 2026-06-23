@@ -22,7 +22,7 @@ function extractKeyPhrases(content: string, limit = 20): string[] {
 
   // Capitalized sequences (likely proper nouns/concepts)
   const capitalizedMatches = content.match(/\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\b/g) || [];
-  capitalizedMatches.forEach((match) => {
+  capitalizedMatches.forEach((match: string) => {
     if (match.length > 2) phrases.add(match);
   });
 

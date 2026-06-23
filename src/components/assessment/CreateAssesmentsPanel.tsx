@@ -187,7 +187,7 @@ export const CreateAssessmentPanel = () => {
                       ))}
                     </div>
                     <p className="text-xs text-muted-foreground">
-                      Select the radio button to mark the correct answer (currently: Option {String.fromCharCode(65 + (q.correctAnswer || 0))})
+                      Select the radio button to mark the correct answer (currently: Option {String.fromCharCode(65 + (parseInt(q.correctAnswer) || 0))})
                     </p>
                   </CardContent>
                 </Card>

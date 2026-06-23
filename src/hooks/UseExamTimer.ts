@@ -3,7 +3,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 export const useExamTimer = (initialTime: number, onExpire?: () => void) => {
   const [timeLeft, setTimeLeft] = useState(initialTime);
   const [isRunning, setIsRunning] = useState(false);
-  const intervalRef = useRef<ReturnType<typeof setInterval>>();
+  const intervalRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
   const onExpireRef = useRef(onExpire);
 
   useEffect(() => {

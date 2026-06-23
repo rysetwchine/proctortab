@@ -15,12 +15,12 @@ export const routers = [
  {
   path: "/student",
   name: "student",
-  element: <StudentDashboard />,
+  element: <StudentDashboard onStartExam={() => {}} />,
 },
 {
   path: "/professor",
   name: "professor",
-  element: <InstructorDashboard />,
+  element: <InstructorDashboard onNavigate={() => {}} />,
 },
   {
     path: "/attendance/scan",

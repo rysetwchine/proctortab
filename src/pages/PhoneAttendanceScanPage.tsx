@@ -146,6 +146,15 @@ export default function PhoneAttendanceScanPage() {
         return;
       }
 
+      if (!('payload' in result)) {
+        setLastScanStatus('error');
+        setLastScanMessage('Invalid scan result');
+        toast.error('Invalid scan result');
+        setPhase('scanning');
+        processingRef.current = false;
+        return;
+      }
+
       try {
         await recordAttendance(courseIdRef.current, result.payload, scannedByRef.current, courseNameRef.current);
         setScanCount((c) => c + 1);
