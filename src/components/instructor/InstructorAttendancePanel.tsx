@@ -707,20 +707,20 @@ export function InstructorAttendancePanel() {
                   </div>
                 )}
                 {scannerPhase === 'loading' && (
-                  <div className="text-center p-6 space-y-2">
+                  <div className="absolute inset-0 bg-slate-950/90 z-20 flex flex-col items-center justify-center gap-2 rounded-3xl">
                     <RefreshCw className="w-8 h-8 text-blue-500 mx-auto animate-spin" />
                     <p className="text-xs text-slate-400">Initializing webcam device feed...</p>
                   </div>
                 )}
                 {scannerPhase === 'saving' && (
-                  <div className="absolute inset-0 bg-slate-950/85 z-10 flex flex-col items-center justify-center gap-2">
+                  <div className="absolute inset-0 bg-slate-950/85 z-20 flex flex-col items-center justify-center gap-2 rounded-3xl">
                     <RefreshCw className="w-8 h-8 text-blue-500 animate-spin" />
                     <p className="text-xs text-slate-400">Validating and saving check-in...</p>
                   </div>
                 )}
 
                 {/* Html5Qrcode video attaches here */}
-                <div id={SCANNER_ELEMENT_ID} className={`w-full h-full [&_video]:!block [&_video]:w-full [&_video]:h-full [&_img]:hidden ${scannerPhase === 'scanning' || scannerPhase === 'saving' ? 'block' : 'hidden'}`} />
+                <div id={SCANNER_ELEMENT_ID} className={`w-full h-full [&_video]:!block [&_video]:w-full [&_video]:h-full [&_img]:hidden ${scannerPhase !== 'idle' ? 'block' : 'hidden'}`} />
               </div>
             </Card>
 

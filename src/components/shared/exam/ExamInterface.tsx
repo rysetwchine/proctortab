@@ -74,6 +74,7 @@ export const ExamInterface = ({ onFinish, examContext, assessment }: ExamInterfa
   const userProfile = JSON.parse(localStorage.getItem('userProfile') || 'null');
   const studentId = user?.uid || user?.id || userProfile?.studentId || 'unknown-student';
   const studentName = user?.name || 'Unknown Student';
+  const studentNumber = user?.studentNumber || userProfile?.studentNumber || 'N/A';
 
   useEffect(() => {
     answersRef.current = answers;
@@ -315,26 +316,50 @@ export const ExamInterface = ({ onFinish, examContext, assessment }: ExamInterfa
   useEffect(() => {
     if (!screenshotEnabled) return; // ← Only enforce when setting is ON
 
+    const handleScreenshotAttempt = (details: string) => {
+      registerEvent('Screenshot Attempt', details);
+      
+      // Overwrite Clipboard with Watermark text
+      try {
+        const timeNow = new Date();
+        const timeStr = `${String(timeNow.getHours()).padStart(2, '0')}:${String(timeNow.getMinutes()).padStart(2, '0')}:${String(timeNow.getSeconds()).padStart(2, '0')}`;
+        const warningText = `[ProctorTab Security Alert] Screenshot blocked for student "${studentName}" (ID: ${studentNumber}) at ${timeStr}. Unauthorized content distribution is strictly prohibited.`;
+        navigator.clipboard.writeText(warningText).catch(() => {});
+      } catch (err) {
+        console.warn('Could not overwrite clipboard:', err);
+      }
+    };
+
     const handleKeyDown = (e: KeyboardEvent) => {
       const isPrintScreen = e.key === 'PrintScreen' || e.code === 'PrintScreen';
       const isSnipping = (e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 's';
 
       if (isPrintScreen) {
         e.preventDefault();
-        registerEvent('Screenshot Attempt', 'PrintScreen key pressed.');
+        handleScreenshotAttempt('PrintScreen key pressed (keydown).');
       }
 
       if (isSnipping) {
         e.preventDefault();
-        registerEvent('Screenshot Attempt', 'Snipping Tool keyboard shortcut activated.');
+        handleScreenshotAttempt('Snipping Tool keyboard shortcut activated (Cmd/Ctrl + Shift + S).');
+      }
+    };
+
+    const handleKeyUp = (e: KeyboardEvent) => {
+      const isPrintScreen = e.key === 'PrintScreen' || e.code === 'PrintScreen';
+      if (isPrintScreen) {
+        e.preventDefault();
+        handleScreenshotAttempt('PrintScreen key released (keyup).');
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [screenshotEnabled, registerEvent]);
+  }, [screenshotEnabled, studentName, studentNumber, registerEvent]);
 
   // Fullscreen constraint handler
   useEffect(() => {
@@ -503,7 +528,7 @@ export const ExamInterface = ({ onFinish, examContext, assessment }: ExamInterfa
     <MotionBackground>
       {/* Screenshot protection watermark */}
       {settings.screenshotProtection && (
-        <div className="fixed inset-0 pointer-events-none z-[45] overflow-hidden select-none opacity-[0.07]">
+        <div className="fixed inset-0 pointer-events-none z-[45] overflow-hidden select-none opacity-[0.16]">
           <svg className="w-full h-full" style={{ pointerEvents: 'none' }} preserveAspectRatio="xMidYMid slice">
             <defs>
               <pattern id="watermark-exam" x="0" y="0" width="220" height="220" patternUnits="userSpaceOnUse">

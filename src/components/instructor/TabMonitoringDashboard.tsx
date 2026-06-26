@@ -152,8 +152,10 @@ export const TabMonitoringDashboard = () => {
                   <TableRow className="bg-muted/50">
                     <TableHead className="font-semibold">Student Name</TableHead>
                     <TableHead className="font-semibold">Assessment</TableHead>
+                    <TableHead className="font-semibold">Violation Event</TableHead>
+                    <TableHead className="font-semibold">Details / Evidence</TableHead>
                     <TableHead className="font-semibold text-center">
-                      Duration (seconds)
+                      Duration
                     </TableHead>
                     <TableHead className="font-semibold text-center">Status</TableHead>
                     <TableHead className="font-semibold text-center">Auto Submitted</TableHead>
@@ -170,8 +172,16 @@ export const TabMonitoringDashboard = () => {
                     >
                       <TableCell className="font-medium">{log.studentName}</TableCell>
                       <TableCell>{log.assessmentTitle || 'Unknown'}</TableCell>
+                      <TableCell>
+                        <span className="font-semibold text-red-400">
+                          {log.violationType || log.violation || 'Tab Switch'}
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-slate-300 max-w-[200px] truncate" title={log.evidence || 'Blurred browser window.'}>
+                        {log.evidence || 'Blurred browser window.'}
+                      </TableCell>
                       <TableCell className="text-center font-semibold">
-                        {log.durationSeconds}s
+                        {log.durationSeconds != null && log.durationSeconds > 0 ? `${log.durationSeconds}s` : '—'}
                       </TableCell>
                       <TableCell className="text-center">
                         <Badge
