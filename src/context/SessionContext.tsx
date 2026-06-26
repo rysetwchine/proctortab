@@ -424,7 +424,19 @@ export const SessionProvider = ({ children }: { children: ReactNode }) => {
           prev.forEach((s) => map.set(String(s.id), s));
           cloudSessions.forEach((s) => {
             const existing = map.get(String(s.id));
-            map.set(String(s.id), existing ? { ...s, ...existing, ...s } : s);
+            if (existing) {
+              map.set(String(s.id), {
+                ...existing,
+                ...s,
+                // Preserve existing items if the new cloud snapshot has them empty (wiped out by sessionFromCourseDoc)
+                modules: s.modules && s.modules.length > 0 ? s.modules : existing.modules,
+                assessments: s.assessments && s.assessments.length > 0 ? s.assessments : existing.assessments,
+                courseAssignments: s.courseAssignments && s.courseAssignments.length > 0 ? s.courseAssignments : existing.courseAssignments,
+                announcements: s.announcements && s.announcements.length > 0 ? s.announcements : existing.announcements,
+              });
+            } else {
+              map.set(String(s.id), s);
+            }
           });
           return Array.from(map.values());
         });
