@@ -1,11 +1,13 @@
 /**
  * useWebcamQrScanner
  * -------------------
- * A fully native webcam + QR scanner hook.
- * Uses getUserMedia() to stream the camera into a <video> ref,
- * then scans frames via canvas + jsQR (no html5-qrcode dependency).
+ * Native webcam + QR scanner hook.
+ * getUserMedia() → <video> ref → canvas + jsQR frame scanning.
  *
- * This avoids all the DOM-sizing / black-screen bugs of html5-qrcode.
+ * KEY FIX: The <video> element must NEVER use display:none while streaming.
+ * Chrome does not decode video frames for hidden (display:none) elements,
+ * causing a permanent black screen even though the camera hardware is on.
+ * Use opacity / visibility instead to hide/show the video in the UI.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -23,15 +25,13 @@ export interface UseWebcamQrScannerOptions {
 }
 
 export interface UseWebcamQrScannerReturn {
-  /** Attach this to the <video> element */
+  /** Attach this ref to the <video> element in JSX */
   videoRef: React.RefObject<HTMLVideoElement>;
   status: ScannerStatus;
   errorMessage: string | null;
-  /** List of available camera devices (populated after first permission grant) */
+  /** Available cameras — populated after first permission grant */
   cameras: MediaDeviceInfo[];
-  /** Start streaming & scanning */
   start: () => Promise<void>;
-  /** Stop streaming & scanning */
   stop: () => void;
 }
 
@@ -40,123 +40,160 @@ export function useWebcamQrScanner({
   fps = 10,
   deviceId,
 }: UseWebcamQrScannerOptions): UseWebcamQrScannerReturn {
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const rafRef = useRef<number | null>(null);
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const videoRef    = useRef<HTMLVideoElement>(null);
+  const streamRef   = useRef<MediaStream | null>(null);
+  const rafRef      = useRef<number | null>(null);
+  const timerRef    = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const canvasRef   = useRef<HTMLCanvasElement | null>(null);
+  const activeRef   = useRef(false); // guards against stale async callbacks
   const onDecodeRef = useRef(onDecode);
   onDecodeRef.current = onDecode;
 
-  const [status, setStatus] = useState<ScannerStatus>('idle');
+  const [status, setStatus]           = useState<ScannerStatus>('idle');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [cameras, setCameras] = useState<MediaDeviceInfo[]>([]);
+  const [cameras, setCameras]         = useState<MediaDeviceInfo[]>([]);
 
-  /** Stop everything */
+  // ── stop ─────────────────────────────────────────────────────────────────
   const stop = useCallback(() => {
+    activeRef.current = false;
+
     if (rafRef.current != null) {
       cancelAnimationFrame(rafRef.current);
       rafRef.current = null;
+    }
+    if (timerRef.current != null) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
     }
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
     }
-    if (videoRef.current) {
-      videoRef.current.srcObject = null;
+    const video = videoRef.current;
+    if (video) {
+      video.pause();
+      video.srcObject = null;
     }
     setStatus('idle');
   }, []);
 
-  /** Scan one frame using canvas + jsQR */
+  // ── scanFrame ─────────────────────────────────────────────────────────────
+  const scheduleNextScan = useCallback((fn: () => void, delayMs: number) => {
+    timerRef.current = setTimeout(() => {
+      if (activeRef.current) {
+        rafRef.current = requestAnimationFrame(fn);
+      }
+    }, delayMs);
+  }, []);
+
   const scanFrame = useCallback(() => {
+    if (!activeRef.current) return;
+
     const video = videoRef.current;
-    if (!video || video.readyState < 2 || video.videoWidth === 0) {
-      rafRef.current = requestAnimationFrame(scanFrame);
+    // Wait until the video has real decoded frame data
+    if (!video || video.readyState < 2 || video.videoWidth === 0 || video.videoHeight === 0) {
+      scheduleNextScan(scanFrame, 100); // retry soon
       return;
     }
 
-    // Lazy-create the offscreen canvas once
-    if (!canvasRef.current) {
-      canvasRef.current = document.createElement('canvas');
-    }
+    // Lazy-create an offscreen canvas
+    if (!canvasRef.current) canvasRef.current = document.createElement('canvas');
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
-    if (!ctx) {
-      rafRef.current = requestAnimationFrame(scanFrame);
-      return;
-    }
+    if (!ctx) { scheduleNextScan(scanFrame, 100); return; }
 
-    canvas.width = video.videoWidth;
+    canvas.width  = video.videoWidth;
     canvas.height = video.videoHeight;
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
     try {
-      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      const result = jsQR(imageData.data, imageData.width, imageData.height, {
+      const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const result  = jsQR(imgData.data, imgData.width, imgData.height, {
         inversionAttempts: 'dontInvert',
       });
       if (result?.data) {
         onDecodeRef.current(result.data);
       }
     } catch {
-      // ignore decode errors — just keep scanning
+      /* ignore decode errors */
     }
 
-    // Schedule next scan at the requested fps
-    const delay = 1000 / fps;
-    setTimeout(() => {
-      rafRef.current = requestAnimationFrame(scanFrame);
-    }, delay);
-  }, [fps]);
+    scheduleNextScan(scanFrame, 1000 / fps);
+  }, [fps, scheduleNextScan]);
 
-  /** Start streaming from the camera */
+  // ── start ─────────────────────────────────────────────────────────────────
   const start = useCallback(async () => {
-    stop(); // clean up first
+    stop();                        // clean up any previous session
+    activeRef.current = true;
     setErrorMessage(null);
     setStatus('requesting');
 
     try {
-      const constraints: MediaStreamConstraints = {
-        audio: false,
-        video: deviceId
-          ? { deviceId: { exact: deviceId }, width: { ideal: 1280 }, height: { ideal: 720 } }
-          : { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } },
-      };
+      // Build video constraints
+      const videoConstraints: MediaTrackConstraints = deviceId
+        ? { deviceId: { exact: deviceId } }
+        : { facingMode: 'user' };
 
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: videoConstraints,
+        audio: false,
+      });
+
+      if (!activeRef.current) {
+        // Component unmounted while we were waiting for permission
+        stream.getTracks().forEach((t) => t.stop());
+        return;
+      }
+
       streamRef.current = stream;
 
-      // Populate camera list (labels are only available after permission)
-      navigator.mediaDevices.enumerateDevices().then((devices) => {
-        setCameras(devices.filter((d) => d.kind === 'videoinput'));
+      // Populate the camera dropdown (labels available after permission)
+      void navigator.mediaDevices.enumerateDevices().then((devs) => {
+        setCameras(devs.filter((d) => d.kind === 'videoinput'));
       });
 
       const video = videoRef.current;
-      if (!video) throw new Error('Video element not mounted.');
+      if (!video) throw new Error('Video element is not mounted in the DOM.');
 
-      video.srcObject = stream;
-      video.muted = true;
+      // Assign stream — MUST happen before play()
+      video.muted      = true;
       video.playsInline = true;
+      video.srcObject  = stream;
 
-      await video.play();
+      // Wait for the video to have decoded its first frame
+      await new Promise<void>((resolve, reject) => {
+        const onReady = () => { cleanup(); resolve(); };
+        const onErr   = () => { cleanup(); reject(new Error('Video failed to load stream.')); };
+        const cleanup = () => {
+          video.removeEventListener('canplay',  onReady);
+          video.removeEventListener('error',    onErr);
+        };
+        video.addEventListener('canplay',  onReady, { once: true });
+        video.addEventListener('error',    onErr,   { once: true });
+        // Fallback — if canplay never fires, resolve after 4 s
+        setTimeout(() => { cleanup(); resolve(); }, 4000);
+      });
+
+      // Explicitly call play() (required in some browsers despite autoPlay attr)
+      try { await video.play(); } catch { /* autoPlay may have already started it */ }
+
+      if (!activeRef.current) return; // stopped while awaiting
+
       setStatus('streaming');
-
-      // Start scanning frames
+      // Begin QR scanning loop
       rafRef.current = requestAnimationFrame(scanFrame);
+
     } catch (err: unknown) {
-      const msg = buildErrorMessage(err);
-      setErrorMessage(msg);
-      setStatus('error');
+      if (activeRef.current) {
+        setErrorMessage(buildErrorMessage(err));
+        setStatus('error');
+      }
       stop();
     }
   }, [deviceId, scanFrame, stop]);
 
   // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      stop();
-    };
-  }, [stop]);
+  useEffect(() => () => { stop(); }, [stop]);
 
   return { videoRef, status, errorMessage, cameras, start, stop };
 }
@@ -165,14 +202,14 @@ function buildErrorMessage(err: unknown): string {
   if (!(err instanceof Error)) return 'Could not start the camera.';
   const msg = err.message.toLowerCase();
   if (/notallowed|permission|denied/.test(msg))
-    return 'Camera permission was blocked. Open browser settings and allow camera access for this site, then try again.';
+    return 'Camera permission was blocked. In browser settings, allow camera access for this site and try again.';
   if (/notfound|devicesnotfound|no camera/.test(msg))
     return 'No camera was found. Please connect a webcam and try again.';
   if (/notreadable|in use|busy|occupied/.test(msg))
-    return 'Camera is already in use by another app (e.g. Zoom, Teams, Windows Camera). Close it and try again.';
+    return 'Camera is in use by another app (Acer QuickPanel, Zoom, Teams, etc.). Close that app and try again.';
   if (/overconstrained/.test(msg))
-    return 'Selected camera does not support the required resolution. Try a different camera.';
+    return 'Selected camera does not support the required settings. Try a different camera.';
   if (/secure|https|insecure/.test(msg))
-    return 'Camera requires HTTPS. Make sure you are opening the app via https://.';
+    return 'Camera requires HTTPS. Open the app via https://.';
   return err.message || 'Could not start the camera.';
 }

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { toast } from 'sonner';
 import {
   Users, CheckCircle2, Clock, XCircle, Search, Camera, Square, Edit, Trash2, Download, FileText,
-  TrendingUp, BarChart3, ArrowUpDown, ChevronLeft, ChevronRight, AlertCircle, RefreshCw, Wifi
+  TrendingUp, BarChart3, ArrowUpDown, ChevronLeft, ChevronRight, AlertCircle, RefreshCw
 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -637,13 +637,17 @@ export function InstructorAttendancePanel() {
                   </div>
                 )}
 
-                {/* ✅ THE NATIVE VIDEO ELEMENT — no html5-qrcode sizing issues */}
+                {/* ✅ THE VIDEO ELEMENT — always rendered, never display:none
+                     Chrome does NOT decode frames for display:none elements.
+                     We use opacity instead to hide/show it visually. */}
                 <video
                   ref={videoRef}
                   autoPlay
                   muted
                   playsInline
-                  className={`absolute inset-0 w-full h-full object-cover rounded-3xl ${isStreaming ? 'block' : 'hidden'}`}
+                  className={`absolute inset-0 w-full h-full object-cover rounded-3xl transition-opacity duration-300 ${
+                    isStreaming ? 'opacity-100' : 'opacity-0 pointer-events-none'
+                  }`}
                 />
               </div>
             </Card>
