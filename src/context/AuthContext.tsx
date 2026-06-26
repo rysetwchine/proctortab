@@ -14,7 +14,59 @@ interface AuthContextType {
 export const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<User | null>(() => {
+    const stored = localStorage.getItem("user");
+    if (stored) {
+      try {
+        const parsed = JSON.parse(stored);
+        return {
+          id: parsed.uid || parsed.id || '',
+          uid: parsed.uid || parsed.id || '',
+          name: parsed.name || '',
+          role: parsed.role || 'student',
+          studentNumber: parsed.studentNumber || '',
+          course: parsed.course || '',
+          year: parsed.year || '',
+        } as any;
+      } catch (e) {
+        console.error('Failed to parse user from localStorage', e);
+      }
+    }
+    return null;
+  });
+
+  // Keep AuthContext user in sync with localStorage updates in real time
+  useEffect(() => {
+    const handleStorageChange = () => {
+      const stored = localStorage.getItem("user");
+      if (stored) {
+        try {
+          const parsed = JSON.parse(stored);
+          setUser({
+            id: parsed.uid || parsed.id || '',
+            uid: parsed.uid || parsed.id || '',
+            name: parsed.name || '',
+            role: parsed.role || 'student',
+            studentNumber: parsed.studentNumber || '',
+            course: parsed.course || '',
+            year: parsed.year || '',
+          } as any);
+        } catch {
+          setUser(null);
+        }
+      } else {
+        setUser(null);
+      }
+    };
+
+    window.addEventListener('storage', handleStorageChange);
+    const interval = setInterval(handleStorageChange, 1000);
+
+    return () => {
+      window.removeEventListener('storage', handleStorageChange);
+      clearInterval(interval);
+    };
+  }, []);
 
   // IMPORTANT:
   // This project uses a local (non-Firebase) login state for UI, but Firebase Storage/Firestore
