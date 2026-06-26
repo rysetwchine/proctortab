@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { toast } from 'sonner';
 import {
   Users, CheckCircle2, Clock, XCircle, Search, Camera, Square, Edit, Trash2, Download, FileText,
-  TrendingUp, BarChart3, ArrowUpDown, ChevronLeft, ChevronRight, AlertCircle, RefreshCw
+  TrendingUp, BarChart3, ArrowUpDown, ChevronLeft, ChevronRight, AlertCircle, RefreshCw,
+  ExternalLink, Copy
 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -552,6 +553,44 @@ export function InstructorAttendancePanel() {
         {/* ── 2. WEBCAM SCANNER ────────────────────────────────────────────── */}
         {activeSubTab === 'scanner' && (
           <div className="grid gap-6 md:grid-cols-[1fr_360px] items-start animate-in fade-in duration-300">
+            {/* Standalone Link Banner */}
+            <div className="md:col-span-2 bg-gradient-to-r from-blue-600/10 to-indigo-600/10 border border-blue-500/20 rounded-3xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xl backdrop-blur-md">
+              <div className="space-y-1">
+                <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                  <ExternalLink className="w-4 h-4 text-blue-400" />
+                  Standalone Webcam Scanner Link
+                </h4>
+                <p className="text-xs text-slate-400">
+                  If the embedded webcam below has issues, copy or open this link to launch a dedicated webcam scanner in a new tab.
+                </p>
+                <div className="text-[11px] font-mono text-blue-300 bg-slate-950/50 rounded-lg px-2.5 py-1.5 break-all mt-2 select-all border border-slate-800/80">
+                  {`${window.location.origin}/webcam-scanner?course=${selectedCourseScanner || (professorCourses[0]?.id || '')}&status=${scannerStatusMode}`}
+                </div>
+              </div>
+              <div className="flex gap-2 shrink-0">
+                <Button
+                  onClick={() => {
+                    const url = `${window.location.origin}/webcam-scanner?course=${selectedCourseScanner || (professorCourses[0]?.id || '')}&status=${scannerStatusMode}`;
+                    navigator.clipboard.writeText(url);
+                    toast.success("Scanner link copied to clipboard!");
+                  }}
+                  variant="outline"
+                  size="sm"
+                  className="rounded-xl px-4 h-9 text-xs font-bold border-slate-800 hover:bg-slate-900 text-slate-300"
+                >
+                  <Copy className="w-3.5 h-3.5 mr-1.5" /> Copy Link
+                </Button>
+                <Button
+                  onClick={() => {
+                    const url = `/webcam-scanner?course=${selectedCourseScanner || (professorCourses[0]?.id || '')}&status=${scannerStatusMode}`;
+                    window.open(url, '_blank');
+                  }}
+                  className="bg-blue-600 hover:bg-blue-700 text-white rounded-xl px-4 h-9 text-xs font-bold"
+                >
+                  <ExternalLink className="w-3.5 h-3.5 mr-1.5" /> Open Scanner
+                </Button>
+              </div>
+            </div>
             {/* Left: Native video feed */}
             <Card className="border-slate-800 bg-slate-950/40 backdrop-blur-xl rounded-3xl overflow-hidden shadow-2xl flex flex-col p-6">
 

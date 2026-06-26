@@ -3,6 +3,7 @@ import { InstructorDashboard } from "./components/instructor/InstructorDashboard
 import Index from "./pages/Index";
 import NotFound from "./pages/NotFound";
 import PhoneAttendanceScanPage from "./pages/PhoneAttendanceScanPage";
+import WebcamScannerPage from "./pages/WebcamScannerPage";
 import { ScannerErrorBoundary } from "./components/shared/ScannerErrorBoundary";
 
 
@@ -30,6 +31,11 @@ export const routers = [
         <PhoneAttendanceScanPage />
       </ScannerErrorBoundary>
     ),
+  },
+  {
+    path: "/webcam-scanner",
+    name: "webcam-scanner",
+    element: <WebcamScannerPage />,
   },
   {
     path: "*",
