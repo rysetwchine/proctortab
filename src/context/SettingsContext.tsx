@@ -16,11 +16,11 @@ interface SettingsContextType {
 }
 
 const defaultSettings: SecuritySettings = {
-  tabDetector: false,
-  copyPasteProtection: false,
-  screenshotProtection: false,
-  fullScreenMode: false,
-  alarmDevice: false,
+  tabDetector: true,
+  copyPasteProtection: true,
+  screenshotProtection: true,
+  fullScreenMode: true,
+  alarmDevice: true,
 };
 
 function settingsEqual(a: SecuritySettings, b: SecuritySettings): boolean {

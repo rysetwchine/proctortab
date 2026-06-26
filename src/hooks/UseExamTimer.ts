@@ -40,7 +40,19 @@ export const useExamTimer = (initialTime: number, onExpire?: () => void) => {
     setIsRunning(false);
   }, [initialTime]);
   const deduct = useCallback((seconds: number) => {
-    setTimeLeft((prev) => Math.max(0, prev - seconds));
+    console.log(`[useExamTimer] deduct called: deducting ${seconds} seconds.`);
+    setTimeLeft((prev) => {
+      const newTime = Math.max(0, prev - seconds);
+      console.log(`[useExamTimer] Time adjusted: from ${prev}s to ${newTime}s.`);
+      if (newTime <= 0) {
+        setIsRunning(false);
+        setTimeout(() => {
+          console.log('[useExamTimer] Time fully depleted. Expiring session.');
+          onExpireRef.current?.();
+        }, 100);
+      }
+      return newTime;
+    });
   }, []);
   const compensate = useCallback((seconds: number) => {
     setTimeLeft((prev) => prev + seconds);

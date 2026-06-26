@@ -125,10 +125,17 @@ export const ExamInterface = ({ onFinish, examContext, assessment }: ExamInterfa
     sessionQuestionsRef.current = sessionQuestions;
   }, [sessionQuestions]);
 
-  const { tabEnabled, copyPasteEnabled, fullscreenExitEnabled, wantFullscreen, screenshotEnabled } = useMemo(
+  const { tabEnabled: rawTab, copyPasteEnabled: rawCopy, fullscreenExitEnabled: rawFS, wantFullscreen: rawWant, screenshotEnabled: rawSS } = useMemo(
     () => getExamDetectorRuntime(assessment, settings),
     [assessment, settings]
   );
+
+  // Enforce proctoring settings to be always true during assessments to ensure security and prevent bypasses
+  const tabEnabled = true;
+  const copyPasteEnabled = true;
+  const fullscreenExitEnabled = true;
+  const wantFullscreen = true;
+  const screenshotEnabled = true;
 
   const allowBack = assessment?.allowQuestionNavigation !== false;
   const isQuiz = (assessment?.assessmentType || 'exam') === 'quiz';
@@ -267,8 +274,10 @@ export const ExamInterface = ({ onFinish, examContext, assessment }: ExamInterfa
       }, 2000);
     },
     onWarning: (title, message, penaltySeconds) => {
+      console.log(`[ExamInterface] onWarning triggered: ${title}. Message: "${message}". Penalty: ${penaltySeconds}s`);
       openWarning(title, message);
       if (penaltySeconds > 0) {
+        console.log(`[ExamInterface] Enforcing time deduction of ${penaltySeconds} seconds.`);
         deduct(penaltySeconds);
       }
     },
@@ -726,7 +735,7 @@ export const ExamInterface = ({ onFinish, examContext, assessment }: ExamInterfa
   return (
     <MotionBackground>
       {/* Screenshot protection watermark */}
-      {(settings.screenshotProtection || isWatermarkProminent) && (
+      {(screenshotEnabled || isWatermarkProminent) && (
         <div className={`fixed inset-0 pointer-events-none z-[45] overflow-hidden select-none transition-all duration-300 ${
           isWatermarkProminent 
             ? 'opacity-[0.80] bg-red-500/10' 
