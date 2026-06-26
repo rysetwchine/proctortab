@@ -22,6 +22,8 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { syncStudentProfileToFirestore } from '@/utils/syncStudentProfileFirestore';
+import { rtdb } from '@/firebase';
+import { ref, set } from 'firebase/database';
 
 interface StudentDashboardProps {
   onStartExam: () => void;
@@ -92,6 +94,26 @@ export const StudentDashboard = ({ onStartExam, onNavigate }: StudentDashboardPr
   const [cameras, setCameras] = useState<any[]>([]);
   const [selectedCameraId, setSelectedCameraId] = useState('');
   const [scannerInstance, setScannerInstance] = useState<Html5Qrcode | null>(null);
+
+  const [testingEvent, setTestingEvent] = useState<string | null>(null);
+  const [testLog, setTestLog] = useState<string>('');
+
+  const sendTestEvent = async (eventVal: string) => {
+    setTestingEvent(eventVal);
+    setTestLog(`Sending "${eventVal}"...`);
+    try {
+      // 1. Write to generic 'student1' path
+      await set(ref(rtdb, 'alerts/student1/event'), eventVal);
+      // 2. Write to student's dynamic path
+      const cleanStudentId = String(studentId).replace(/[.#$/\[\]]/g, '_');
+      await set(ref(rtdb, `alerts/${cleanStudentId}/event`), eventVal);
+      setTestLog(`Pushed "${eventVal}" to RTDB at ${new Date().toLocaleTimeString()}`);
+      toast.success(`Sent alert event: ${eventVal}`);
+    } catch (e: any) {
+      setTestLog(`Error: ${e.message}`);
+      toast.error(`Send failed: ${e.message}`);
+    }
+  };
 
   const myCoursesList = useMemo(() => enrolledCourses(sessions, studentId), [sessions, studentId]);
 
@@ -436,6 +458,82 @@ export const StudentDashboard = ({ onStartExam, onNavigate }: StudentDashboardPr
           </div>
 
         </div>
+
+        {/* ESP32 Hardware LED Tester */}
+        <section className="border border-indigo-500/20 bg-slate-950/40 rounded-3xl p-6 backdrop-blur-md shadow-xl mt-6 space-y-4">
+          <div className="flex items-center gap-2">
+            <Laptop className="w-5 h-5 text-indigo-400" />
+            <h3 className="text-lg font-bold text-white uppercase tracking-wider">ESP32 Hardware LED & Alert Tester</h3>
+          </div>
+          <p className="text-slate-400 text-xs leading-relaxed max-w-xl">
+            Test the physical LEDs and Buzzer on your ESP32 board in real-time. Clicking each button below writes the corresponding alert event code to your Firebase Realtime Database path.
+          </p>
+          
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <button
+              onClick={() => sendTestEvent('tab_switch_1')}
+              className="px-4 py-3 rounded-xl border border-emerald-500/30 text-emerald-400 bg-emerald-500/5 hover:bg-emerald-500/10 text-xs font-bold text-left transition-all"
+            >
+              <div className="font-mono text-[9px] text-emerald-500/80 mb-0.5">PIN 12 (WHITE LED)</div>
+              <span>Tab Switch 1 (White LED)</span>
+            </button>
+            <button
+              onClick={() => sendTestEvent('tab_switch_2')}
+              className="px-4 py-3 rounded-xl border border-yellow-500/30 text-yellow-400 bg-yellow-500/5 hover:bg-yellow-500/10 text-xs font-bold text-left transition-all"
+            >
+              <div className="font-mono text-[9px] text-yellow-500/80 mb-0.5">PIN 15 (YELLOW LED)</div>
+              <span>Tab Switch 2 (Yellow LED)</span>
+            </button>
+            <button
+              onClick={() => sendTestEvent('tab_switch_3')}
+              className="px-4 py-3 rounded-xl border border-rose-500/30 text-rose-400 bg-rose-500/5 hover:bg-rose-500/10 text-xs font-bold text-left transition-all"
+            >
+              <div className="font-mono text-[9px] text-rose-500/80 mb-0.5">PIN 18 (RED LED 1)</div>
+              <span>Tab Switch 3 (Red LED 1)</span>
+            </button>
+            <button
+              onClick={() => sendTestEvent('screen_shot')}
+              className="px-4 py-3 rounded-xl border border-rose-500/30 text-rose-400 bg-rose-500/5 hover:bg-rose-500/10 text-xs font-bold text-left transition-all"
+            >
+              <div className="font-mono text-[9px] text-rose-500/80 mb-0.5">PIN 22 (RED LED 2)</div>
+              <span>Screenshot (Red LED 2)</span>
+            </button>
+            <button
+              onClick={() => sendTestEvent('mouse_leave')}
+              className="px-4 py-3 rounded-xl border border-rose-500/30 text-rose-450 bg-rose-500/5 hover:bg-rose-500/10 text-xs font-bold text-left transition-all"
+            >
+              <div className="font-mono text-[9px] text-rose-500/80 mb-0.5">PIN 25 (RED LED 3)</div>
+              <span>Mouse Exit (Red LED 3)</span>
+            </button>
+            <button
+              onClick={() => sendTestEvent('full_screen_exit')}
+              className="px-4 py-3 rounded-xl border border-rose-500/30 text-rose-450 bg-rose-500/5 hover:bg-rose-500/10 text-xs font-bold text-left transition-all"
+            >
+              <div className="font-mono text-[9px] text-rose-500/80 mb-0.5">PIN 28 (RED LED 4)</div>
+              <span>Fullscreen Exit (Red LED 4)</span>
+            </button>
+            <button
+              onClick={() => sendTestEvent('full_screen_exit')}
+              className="px-4 py-3 rounded-xl border border-rose-500/30 text-rose-450 bg-rose-500/10 hover:bg-rose-500/15 text-xs font-bold text-left transition-all"
+            >
+              <div className="font-mono text-[9px] text-rose-500/80 mb-0.5">PIN 23 (BUZZER + ALL)</div>
+              <span>Buzzer Trigger</span>
+            </button>
+            <button
+              onClick={() => sendTestEvent('')}
+              className="px-4 py-3 rounded-xl border border-slate-700 text-slate-300 bg-slate-900/50 hover:bg-slate-800 text-xs font-bold text-left transition-all"
+            >
+              <div className="font-mono text-[9px] text-slate-500 mb-0.5">RESET ALL</div>
+              <span>Clear / Reset RTDB</span>
+            </button>
+          </div>
+          
+          {testLog && (
+            <div className="p-3 rounded-xl bg-slate-950 border border-slate-900 font-mono text-[10px] text-indigo-300">
+              <span className="text-slate-500">Live Log:</span> {testLog}
+            </div>
+          )}
+        </section>
 
       </div>
 

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { db } from '@/firebase';
-import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, addDoc, serverTimestamp, doc, setDoc, deleteDoc } from 'firebase/firestore';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { QuestionCard } from './QuestionCard';
@@ -252,6 +252,71 @@ export const ExamInterface = ({ onFinish, examContext, assessment }: ExamInterfa
       }
     },
   });
+
+  // Synchronize student's active exam progress to Firestore in real-time
+  useEffect(() => {
+    if (!studentId || !assessment?.id) return;
+    const docRef = doc(db, 'active_exam_students', `${studentId}_${assessment.id}`);
+    
+    const totalQuestions = sessionQuestions.length;
+    const answersCount = Object.keys(answers).length;
+    const progressPercent = totalQuestions > 0 ? Math.round((answersCount / totalQuestions) * 100) : 0;
+    
+    // Count tab switch / violation events
+    const violationsCount = events.length;
+    
+    let currentStatus = 'Normal';
+    if (violationsCount > 2) {
+      currentStatus = 'Violation';
+    } else if (violationsCount > 0) {
+      currentStatus = 'Suspicious';
+    }
+
+    const payload = {
+      studentId,
+      studentName,
+      studentNumber,
+      assessmentId: assessment.id,
+      assessmentTitle: assessment.title,
+      courseId: examContext?.assessmentId || assessment?.id || '',
+      courseTitle: examContext?.courseTitle || '',
+      currentQuestion: currentQuestionIndex + 1,
+      totalQuestions,
+      answersCount,
+      progress: progressPercent,
+      violations: violationsCount,
+      status: currentStatus,
+      lastActivity: new Date(),
+    };
+
+    setDoc(docRef, payload, { merge: true }).catch((err) => {
+      console.warn('Could not update active exam student status:', err);
+    });
+  }, [
+    studentId,
+    studentName,
+    studentNumber,
+    assessment?.id,
+    assessment?.title,
+    examContext?.assessmentId,
+    examContext?.courseTitle,
+    currentQuestionIndex,
+    sessionQuestions.length,
+    answers,
+    events,
+  ]);
+
+  // Clean up student status from Firestore when exiting the exam page (unmounting)
+  useEffect(() => {
+    return () => {
+      if (studentId && assessment?.id) {
+        const docRef = doc(db, 'active_exam_students', `${studentId}_${assessment.id}`);
+        deleteDoc(docRef).catch((err) => {
+          console.warn('Could not delete active exam student status on cleanup:', err);
+        });
+      }
+    };
+  }, [studentId, assessment?.id]);
 
   // ─── Multi-Desktop / Virtual Desktop Overlay ────────────────────────────
   // We detect virtual desktop switches by listening to visibilitychange.

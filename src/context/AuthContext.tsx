@@ -69,17 +69,17 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   }, []);
 
   useEffect(() => {
-    // If a user is already logged in locally, do NOT sign in anonymously.
-    // Let Firebase Auth restore the authenticated session.
-    const stored = localStorage.getItem("user");
-    if (stored) return;
-
-    if (auth.currentUser) return;
-    signInAnonymously(auth).catch((e) => {
-      // If anonymous auth is disabled in Firebase console, uploads will still fail with 401/403
-      // (often surfacing as a CORS/preflight error). We'll keep UI running either way.
-      console.warn('[Auth] Anonymous Firebase auth failed:', e instanceof Error ? e.message : e);
+    const unsubscribe = auth.onAuthStateChanged((firebaseUser) => {
+      if (!firebaseUser) {
+        const stored = localStorage.getItem("user");
+        if (!stored) {
+          signInAnonymously(auth).catch((e) => {
+            console.warn('[Auth] Anonymous Firebase auth failed:', e instanceof Error ? e.message : e);
+          });
+        }
+      }
     });
+    return unsubscribe;
   }, []);
 
   const login = (username: string, role: UserRole) => {

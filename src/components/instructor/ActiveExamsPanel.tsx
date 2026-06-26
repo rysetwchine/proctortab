@@ -62,14 +62,36 @@ export const ActiveExamsPanel = () => {
     }
   };
 
-  // Mock real-time monitoring data
-  const liveStudents = mockStudents.slice(0, 5).map((s, idx) => ({
-    ...s,
-    progress: Math.floor(Math.random() * 100),
-    currentQuestion: Math.floor(Math.random() * 20) + 1,
-    violations: s.violations,
-    lastActivity: new Date(Date.now() - Math.random() * 300000),
-  }));
+  const [liveStudents, setLiveStudents] = useState<any[]>([]);
+
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, 'active_exam_students'), (snapshot) => {
+      const list = snapshot.docs.map((docSnap) => {
+        const d = docSnap.data();
+        return {
+          id: docSnap.id,
+          name: d.studentName || 'Student',
+          studentId: d.studentId || 'N/A',
+          progress: d.progress ?? 0,
+          currentQuestion: d.currentQuestion ?? 1,
+          totalQuestions: d.totalQuestions ?? 20,
+          violations: d.violations ?? 0,
+          status: d.status || 'Normal',
+        };
+      });
+
+      // Sort by violations count descending (highest risk first), then by name
+      list.sort((a, b) => {
+        if (b.violations !== a.violations) {
+          return b.violations - a.violations;
+        }
+        return a.name.localeCompare(b.name);
+      });
+
+      setLiveStudents(list);
+    });
+    return () => unsub();
+  }, []);
 
   const activeExams = assessments.filter((a) => a.status === 'active');
 
@@ -205,7 +227,7 @@ export const ActiveExamsPanel = () => {
                           <span className="text-xs">{student.progress}%</span>
                         </div>
                       </td>
-                      <td className="px-4 py-3 text-sm">{student.currentQuestion}/20</td>
+                      <td className="px-4 py-3 text-sm">{student.currentQuestion}/{student.totalQuestions || 20}</td>
                       <td className="px-4 py-3">
                         <span className={`font-semibold ${student.violations > 2 ? 'text-red-600' : student.violations > 0 ? 'text-yellow-600' : 'text-green-600'}`}>
                           {student.violations}

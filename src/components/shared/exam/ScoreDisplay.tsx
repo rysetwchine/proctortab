@@ -206,7 +206,6 @@ export const ScoreDisplay = ({
                             <th className="p-3.5">Time</th>
                             <th className="p-3.5">Incident Category</th>
                             <th className="p-3.5">Evidence Details</th>
-                            <th className="p-3.5 text-right">Points Weight</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-900">
@@ -222,7 +221,6 @@ export const ScoreDisplay = ({
                                 <td className="p-3.5 font-mono text-[10px] text-slate-450 whitespace-nowrap">{timeStr}</td>
                                 <td className="p-3.5 font-bold text-rose-455">{evt.type}</td>
                                 <td className="p-3.5 text-[11px] leading-relaxed max-w-xs sm:max-w-md break-words">{evt.details}</td>
-                                <td className="p-3.5 text-right font-mono font-bold text-slate-300">+{evt.score} pts</td>
                               </tr>
                             );
                           })}

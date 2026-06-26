@@ -276,8 +276,19 @@ export const SessionProvider = ({ children }: { children: ReactNode }) => {
    */
   const [currentUser, setCurrentUser] = useState(() => auth.currentUser);
   const loadedModuleCoursesRef = useRef<Set<string>>(new Set());
-  const loadedAssessmentCoursesRef = useRef<Set<string>>(new Set());
   const loadedCoursesFromCloudRef = useRef(false);
+  const examsSubsRef = useRef<Map<string, () => void>>(new Map());
+  const resultsSubsRef = useRef<Map<string, () => void>>(new Map());
+  const questionsCacheRef = useRef<Map<string, Question[]>>(new Map());
+  const lastUserUidRef = useRef<string | null>(null);
+
+  const clearAllSubscriptions = useCallback(() => {
+    examsSubsRef.current.forEach((unsub) => unsub());
+    examsSubsRef.current.clear();
+    resultsSubsRef.current.forEach((unsub) => unsub());
+    resultsSubsRef.current.clear();
+    questionsCacheRef.current.clear();
+  }, []);
 
   const normalizeJoinCode = (code: string) =>
     String(code || '')
@@ -371,14 +382,14 @@ export const SessionProvider = ({ children }: { children: ReactNode }) => {
       if (!user) {
         // Reset caches on logout so next login refreshes.
         loadedModuleCoursesRef.current.clear();
-        loadedAssessmentCoursesRef.current.clear();
         loadedCoursesFromCloudRef.current = false;
+        clearAllSubscriptions();
         setSessions([]);
         localStorage.removeItem('proctortab_sessions');
       }
     });
     return unsubscribe;
-  }, []);
+  }, [clearAllSubscriptions]);
 
   /**
    * Load courses from Firestore so courses are shared across devices:
@@ -388,7 +399,18 @@ export const SessionProvider = ({ children }: { children: ReactNode }) => {
    * Without this, the app relies on localStorage and different devices won't see the same courses.
    */
   useEffect(() => {
-    if (!currentUser) return;
+    if (!currentUser) {
+      clearAllSubscriptions();
+      return;
+    }
+
+    const currentUid = currentUser.uid;
+    if (lastUserUidRef.current !== currentUid) {
+      loadedCoursesFromCloudRef.current = false;
+      lastUserUidRef.current = currentUid;
+      clearAllSubscriptions();
+    }
+
     if (loadedCoursesFromCloudRef.current) return;
 
     const stored = (() => {
@@ -469,9 +491,9 @@ export const SessionProvider = ({ children }: { children: ReactNode }) => {
     );
 
     return () => unsubscribe();
-  }, [currentUser]);
+  }, [currentUser, clearAllSubscriptions]);
 
-  // Load Firestore modules/assessments ONCE per course when the user is logged in.
+  // Load Firestore modules/assessments (real-time subcollections) per course when the user is logged in.
   useEffect(() => {
     if (!currentUser) return;
     if (!sessions.length) return;
@@ -484,25 +506,160 @@ export const SessionProvider = ({ children }: { children: ReactNode }) => {
         loadModulesFromCloud(sid);
       }
 
-      if (session.type === 'course' && !loadedAssessmentCoursesRef.current.has(sid)) {
-        loadedAssessmentCoursesRef.current.add(sid);
-        (async () => {
-          try {
-            const cloud = await loadCourseAssessmentsFromFirestore(sid);
-            if (!cloud.length) return;
-            setSessions((prev) =>
-              prev.map((s) => {
-                if (String(s.id) !== sid) return s;
-                const map = new Map<string, CourseAssessment>();
-                (s.assessments || []).forEach((a) => map.set(String(a.id), a));
-                cloud.forEach((a) => map.set(String(a.id), a));
-                return { ...s, assessments: Array.from(map.values()) };
-              })
-            );
-          } catch (e) {
-            console.warn('[SessionContext] Failed to load course assessments from Firestore:', e);
+      if (session.type === 'course') {
+        if (!examsSubsRef.current.has(sid)) {
+          const examsRef = collection(db, 'courses', sid, 'exams');
+          const unsubscribeExams = onSnapshot(
+            examsRef,
+            (examsSnap) => {
+              const assessmentsData = examsSnap.docs.map((d) => {
+                const data = d.data();
+                return { id: d.id, data };
+              });
+
+              // Subscribe to results for each assessment in real time
+              assessmentsData.forEach(({ id: examId, data }) => {
+                if (data.kind !== 'course-assessment') return;
+                const resKey = `${sid}-${examId}`;
+
+                if (!resultsSubsRef.current.has(resKey)) {
+                  const resultsRef = collection(db, 'courses', sid, 'exams', examId, 'results');
+                  const unsubscribeResults = onSnapshot(resultsRef, (resultsSnap) => {
+                    const submissions = resultsSnap.docs
+                      .map((rd) => {
+                        const r: any = rd.data();
+                        const score = r?.score;
+                        const maxScore = data.maxScore ?? 100;
+                        return {
+                          studentId: String(r?.studentId ?? rd.id),
+                          studentName: String(r?.studentName ?? ''),
+                          score: typeof score === 'number' ? score : (score == null ? null : Number(score)),
+                          maxScore,
+                          submittedAt: r?.timestamp?.toDate
+                            ? r.timestamp.toDate().toISOString()
+                            : r?.submittedAt || r?.completedAt,
+                        };
+                      })
+                      .filter((s) => !!s.studentId);
+
+                    // Update submissions list in local state
+                    setSessions((prev) =>
+                      prev.map((s) => {
+                        if (String(s.id) !== sid) return s;
+                        const assessments = (s.assessments || []).map((a) => {
+                          if (String(a.id) !== examId) return a;
+                          return { ...a, submissions };
+                        });
+                        return { ...s, assessments };
+                      })
+                    );
+                  });
+                  resultsSubsRef.current.set(resKey, unsubscribeResults);
+                }
+
+                // Load questions for the assessment if not already cached
+                if (!questionsCacheRef.current.has(resKey)) {
+                  const qColl = collection(db, 'courses', sid, 'exams', examId, 'questions');
+                  getDocs(qColl).then((qSnap) => {
+                    const questionItems: Question[] = qSnap.docs
+                      .map((qd) => qd.data() as Question)
+                      .filter(Boolean)
+                      .sort((a: any, b: any) => Number(a.id) - Number(b.id));
+
+                    questionsCacheRef.current.set(resKey, questionItems);
+
+                    // Update questionItems in local state
+                    setSessions((prev) =>
+                      prev.map((s) => {
+                        if (String(s.id) !== sid) return s;
+                        const assessments = (s.assessments || []).map((a) => {
+                          if (String(a.id) !== examId) return a;
+                          return { ...a, questionItems };
+                        });
+                        return { ...s, assessments };
+                      })
+                    );
+                  }).catch((err) => {
+                    console.warn(`Failed to fetch questions for ${resKey}:`, err);
+                  });
+                }
+              });
+
+              // Construct new assessments list
+              const newAssessmentsList = assessmentsData
+                .map(({ id: examId, data }) => {
+                  if (data.kind !== 'course-assessment') return null;
+                  const resKey = `${sid}-${examId}`;
+                  const questionItems = questionsCacheRef.current.get(resKey);
+
+                  return {
+                    id: examId,
+                    title: data.title || 'Untitled',
+                    duration: data.duration ?? 30,
+                    dueDate: data.dueDate ?? '',
+                    questions: data.questions ?? questionItems?.length ?? 0,
+                    assessmentType: data.assessmentType ?? 'exam',
+                    maxScore: data.maxScore ?? 100,
+                    passingScore: data.passingScore ?? 60,
+                    maxAttempts: data.maxAttempts ?? 1,
+                    randomizeQuestions: data.randomizeQuestions ?? false,
+                    randomizeChoices: data.randomizeChoices ?? false,
+                    allowQuestionNavigation: data.allowQuestionNavigation ?? true,
+                    password: (data.password || '').trim() || undefined,
+                    useGlobalDetectors: data.useGlobalDetectors ?? true,
+                    detectors: data.detectors ?? undefined,
+                    questionSource: data.questionSource ?? undefined,
+                    sourceModuleId: data.sourceModuleId ?? undefined,
+                    sourceModuleTitle: data.sourceModuleTitle ?? undefined,
+                    generatedTopic: data.generatedTopic ?? undefined,
+                    generatedDifficulty: data.generatedDifficulty ?? undefined,
+                    questionItems,
+                    submissions: [],
+                  } as CourseAssessment;
+                })
+                .filter(Boolean) as CourseAssessment[];
+
+              // Merge assessments list into sessions
+              setSessions((prev) =>
+                prev.map((s) => {
+                  if (String(s.id) !== sid) return s;
+                  const map = new Map<string, CourseAssessment>();
+                  (s.assessments || []).forEach((a) => map.set(String(a.id), a));
+                  newAssessmentsList.forEach((a) => {
+                    const existing = map.get(String(a.id));
+                    map.set(String(a.id), {
+                      ...a,
+                      submissions: existing?.submissions && existing.submissions.length > 0 ? existing.submissions : a.submissions,
+                      questionItems: existing?.questionItems ? existing.questionItems : a.questionItems,
+                    });
+                  });
+                  return { ...s, assessments: Array.from(map.values()) };
+                })
+              );
+            },
+            (err) => {
+              console.warn(`[SessionContext] Failed to load exams for ${sid}:`, err);
+            }
+          );
+          examsSubsRef.current.set(sid, unsubscribeExams);
+        }
+      }
+    });
+
+    // Cleanup subscriptions for removed courses
+    const currentCourseIds = new Set(sessions.map((s) => String(s.id)));
+    examsSubsRef.current.forEach((_, sid) => {
+      if (!currentCourseIds.has(sid)) {
+        examsSubsRef.current.get(sid)?.();
+        examsSubsRef.current.delete(sid);
+
+        resultsSubsRef.current.forEach((_, resKey) => {
+          if (resKey.startsWith(`${sid}-`)) {
+            resultsSubsRef.current.get(resKey)?.();
+            resultsSubsRef.current.delete(resKey);
+            questionsCacheRef.current.delete(resKey);
           }
-        })();
+        });
       }
     });
   }, [currentUser, sessions, loadModulesFromCloud]);
