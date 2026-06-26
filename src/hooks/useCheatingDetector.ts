@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef } from 'react';
-import { db } from '@/firebase';
+import { db, rtdb } from '@/firebase';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { ref, set } from 'firebase/database';
 import type { CourseAssessment } from '@/context/SessionContext';
 
 export interface ProctorEvent {
@@ -183,6 +184,36 @@ export const useCheatingDetector = ({
           violationType: eventType.toLowerCase().replace(/\s+/g, '_'),
           deductedMinutes: isQuiz ? (newSeverity === 'Suspicious' ? 5 : 3) : (newSeverity === 'Suspicious' ? 10 : 5),
         });
+
+        // Write to Firebase Realtime Database to alert the ESP32 hardware board in real-time
+        let rtdbEvent = '';
+        const lowerRaw = rawType.toLowerCase();
+        if (lowerRaw.includes('tab')) {
+          const tabSwitchesCount = updatedEvents.filter(e => e.type.toLowerCase().includes('tab')).length;
+          if (tabSwitchesCount === 1) rtdbEvent = 'tab_switch_1';
+          else if (tabSwitchesCount === 2) rtdbEvent = 'tab_switch_2';
+          else rtdbEvent = 'tab_switch_3';
+        } else if (lowerRaw.includes('screenshot') || lowerRaw.includes('printscreen') || lowerRaw.includes('snip')) {
+          rtdbEvent = 'screen_shot';
+        } else if (lowerRaw.includes('mouse')) {
+          rtdbEvent = 'mouse_leave';
+        } else if (lowerRaw.includes('fullscreen')) {
+          rtdbEvent = 'full_screen_exit';
+        }
+
+        if (rtdbEvent) {
+          try {
+            // Write to fallback/generic 'student1' path for testing with ESP32 board
+            await set(ref(rtdb, 'alerts/student1/event'), rtdbEvent);
+
+            // Write to student's dynamic path
+            const cleanStudentId = String(studentId).replace(/[.#$/\[\]]/g, '_');
+            await set(ref(rtdb, `alerts/${cleanStudentId}/event`), rtdbEvent);
+            console.log(`[RTDB Alert] Pushed "${rtdbEvent}" to alerts/student1/event and alerts/${cleanStudentId}/event`);
+          } catch (rtdbErr) {
+            console.warn('Could not write alert to Realtime Database:', rtdbErr);
+          }
+        }
       } catch (err) {
         console.warn('Could not log violation event to Firestore:', err);
       }

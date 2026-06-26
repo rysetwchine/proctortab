@@ -2,6 +2,7 @@ import { initializeApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
+import { getDatabase } from "firebase/database";
 
 const firebaseConfig = {
   apiKey: "AIzaSyBO5bOxwb4uxkrd2Xeul6OL6k1K-PxucMI",
@@ -15,7 +16,8 @@ const firebaseConfig = {
   storageBucket: "shifting-tab-detector.firebasestorage.app",
   messagingSenderId: "730964016387",
   appId: "1:730964016387:web:a6baa8fec2c4b5907b3d36",
-  measurementId: "G-1NYHHC1Y9H"
+  measurementId: "G-1NYHHC1Y9H",
+  databaseURL: "https://shifting-tab-detector-default-rtdb.firebaseio.com/"
 };
 
 const app = initializeApp(firebaseConfig);
@@ -23,4 +25,5 @@ const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const db = getFirestore(app);
 export const storage = getStorage(app);
+export const rtdb = getDatabase(app);
 export const firebaseApp = app;
