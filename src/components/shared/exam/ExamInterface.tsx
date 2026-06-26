@@ -12,7 +12,6 @@ import { useMouseBoundaryDetector } from '@/hooks/useMouseBoundaryDetector';
 import { useSettings } from '@/hooks/useSettings';
 import { useNetworkCompensation } from '@/hooks/useNetworkCompensation';
 import { useCheatingDetector } from '@/hooks/useCheatingDetector';
-import { useVirtualDesktopDetector } from '@/hooks/useVirtualDesktopDetector';
 import type { CourseAssessment } from '@/context/SessionContext';
 import { getExamDetectorRuntime } from '@/utils/examDetectorPolicy';
 import { prepareExamQuestions } from '@/utils/examSession';
@@ -65,6 +64,9 @@ export const ExamInterface = ({ onFinish, examContext, assessment }: ExamInterfa
   const [currentTime, setCurrentTime] = useState(() => new Date());
   const [sessionBlock, setSessionBlock] = useState<{ isBlocked: boolean; reason?: string }>({ isBlocked: false });
   const [saveStatus, setSaveStatus] = useState<'saving' | 'saved'>('saved');
+  // Multi-desktop warning overlay state
+  const [showDesktopWarning, setShowDesktopWarning] = useState(false);
+  const [desktopWarningCount, setDesktopWarningCount] = useState(0);
 
   const { settings } = useSettings();
   const answersRef = useRef(answers);
@@ -213,20 +215,14 @@ export const ExamInterface = ({ onFinish, examContext, assessment }: ExamInterfa
     };
   }, [studentId, studentName, assessment, examContext]);
 
-  // Virtual desktop warning overlay state
-  const [showDesktopWarning, setShowDesktopWarning] = useState(false);
-  const [desktopWarningCount, setDesktopWarningCount] = useState(0);
-
   // Initialize unified anti-cheating verification system
   const {
     events,
     confidenceScore,
     severityLevel,
     intentionalSwitchCount,
-    virtualDesktopCount,
     registerEvent,
   } = useCheatingDetector({
-    // eventsRef is kept current via useEffect below
     studentId,
     studentName,
     assessment,
@@ -257,26 +253,26 @@ export const ExamInterface = ({ onFinish, examContext, assessment }: ExamInterfa
     },
   });
 
-  // Virtual desktop detection handler
-  const handleVirtualDesktopSuspected = useCallback(
-    (durationSeconds: number) => {
-      setDesktopWarningCount((c) => c + 1);
-      setShowDesktopWarning(true);
-      registerEvent(
-        'Virtual Desktop Switch',
-        `Suspected switch to a different virtual desktop (Desktop 2 / another workspace) for ${durationSeconds} second(s).`,
-        durationSeconds
-      );
-    },
-    [registerEvent]
-  );
+  // ─── Multi-Desktop / Virtual Desktop Overlay ────────────────────────────
+  // We detect virtual desktop switches by listening to visibilitychange.
+  // A separate listener here ONLY shows the visual warning overlay.
+  // The actual violation is already logged by useTabDurationDetector below
+  // (both a tab switch and a virtual desktop switch hide the page).
+  // We do NOT call registerEvent here to avoid double-counting.
+  useEffect(() => {
+    if (!tabEnabled) return;
 
-  // Virtual desktop switch detector hook
-  useVirtualDesktopDetector({
-    enabled: tabEnabled,
-    onVirtualDesktopSuspected: handleVirtualDesktopSuspected,
-    sharedLastViolationTimeRef: lastViolationTimeRef,
-  });
+    const handlePageHide = () => {
+      if (document.hidden) {
+        // Show the multi-desktop/tab warning overlay immediately when page is hidden
+        setShowDesktopWarning(true);
+        setDesktopWarningCount((c) => c + 1);
+      }
+    };
+
+    document.addEventListener('visibilitychange', handlePageHide);
+    return () => document.removeEventListener('visibilitychange', handlePageHide);
+  }, [tabEnabled]);
 
   // Keep eventsRef always current so handleExpire can read it without referencing events before init
   useEffect(() => {
@@ -869,8 +865,8 @@ export const ExamInterface = ({ onFinish, examContext, assessment }: ExamInterfa
               {/* Violation counter */}
               <div className="grid grid-cols-2 gap-3">
                 <div className="bg-slate-900/50 border border-slate-800/60 rounded-xl p-3 text-center">
-                  <p className="text-[10px] uppercase tracking-widest text-slate-500 font-bold">Desktop Switches</p>
-                  <p className="text-2xl font-black text-rose-400 mt-1">{virtualDesktopCount}</p>
+                  <p className="text-[10px] uppercase tracking-widest text-slate-500 font-bold">Tab/Desktop Switches</p>
+                  <p className="text-2xl font-black text-rose-400 mt-1">{desktopWarningCount}</p>
                 </div>
                 <div className="bg-slate-900/50 border border-slate-800/60 rounded-xl p-3 text-center">
                   <p className="text-[10px] uppercase tracking-widest text-slate-500 font-bold">Intentional Switches</p>

@@ -44,8 +44,6 @@ export const useCheatingDetector = ({
   // Intentional tab switch counter (>3 seconds = intentional)
   const [intentionalSwitchCount, setIntentionalSwitchCount] = useState(0);
   const intentionalSwitchCountRef = useRef(0);
-  // Virtual desktop switch counter
-  const [virtualDesktopCount, setVirtualDesktopCount] = useState(0);
 
   const eventsRef = useRef<ProctorEvent[]>([]);
   const autoSubmittedRef = useRef(false);
@@ -66,23 +64,22 @@ export const useCheatingDetector = ({
       let eventType = rawType;
 
       const isTabEvent = rawType.toLowerCase().includes('tab');
-      const isVirtualDesktop = rawType.toLowerCase().includes('virtual') || rawType.toLowerCase().includes('desktop');
 
-      if (isTabEvent || isVirtualDesktop) {
+      if (isTabEvent) {
         const secs = durationSeconds ?? 0;
         if (secs <= 1.5) {
           score = 8;
-          eventType = isVirtualDesktop ? 'Virtual Desktop Switch (Accidental)' : 'Accidental Tab Switch';
+          eventType = 'Accidental Tab Switch';
         } else if (secs <= 4) {
           score = 15;
-          eventType = isVirtualDesktop ? 'Virtual Desktop Switch (Suspicious)' : 'Suspicious Tab Switch';
+          eventType = 'Suspicious Tab Switch';
         } else {
           score = 30;
-          eventType = isVirtualDesktop ? 'Virtual Desktop Switch (Intentional)' : 'Intentional Tab Switch';
+          eventType = 'Intentional Tab Switch';
         }
 
         // ─── FEATURE: 3-Strike Intentional Switch Auto-Submit ────────────────
-        // An "intentional" event is any tab/desktop switch that lasted >3 seconds
+        // An "intentional" event is any tab switch that lasted >3 seconds
         if (secs > 3) {
           const newCount = intentionalSwitchCountRef.current + 1;
           intentionalSwitchCountRef.current = newCount;
@@ -145,11 +142,6 @@ export const useCheatingDetector = ({
               isQuiz ? 180 : 300
             );
           }
-        }
-
-        // Track virtual desktop count separately for display
-        if (isVirtualDesktop) {
-          setVirtualDesktopCount((c) => c + 1);
         }
       } else if (rawType.toLowerCase().includes('fullscreen')) {
         score = 20;
@@ -267,9 +259,9 @@ export const useCheatingDetector = ({
         // Write to Firebase Realtime Database for ESP32 board
         let rtdbEvent = '';
         const lowerRaw = rawType.toLowerCase();
-        if (lowerRaw.includes('tab') || lowerRaw.includes('desktop')) {
+        if (lowerRaw.includes('tab')) {
           const tabSwitchesCount = updatedEvents.filter(e =>
-            e.type.toLowerCase().includes('tab') || e.type.toLowerCase().includes('desktop')
+            e.type.toLowerCase().includes('tab')
           ).length;
           if (tabSwitchesCount === 1) rtdbEvent = 'tab_switch_1';
           else if (tabSwitchesCount === 2) rtdbEvent = 'tab_switch_2';
@@ -296,7 +288,7 @@ export const useCheatingDetector = ({
       }
 
       // Execute actions based on Severity (only for non-intentional events that weren't already warned above)
-      const isIntentionalTabAlreadyHandled = (isTabEvent || isVirtualDesktop) && (durationSeconds ?? 0) > 3;
+      const isIntentionalTabAlreadyHandled = isTabEvent && (durationSeconds ?? 0) > 3;
 
       if (newSeverity === 'Confirmed Violation' && !autoSubmittedRef.current) {
         autoSubmittedRef.current = true;
@@ -330,7 +322,6 @@ export const useCheatingDetector = ({
     setConfidenceScore(0);
     setSeverityLevel('Informational');
     setIntentionalSwitchCount(0);
-    setVirtualDesktopCount(0);
   }, []);
 
   return {
@@ -338,7 +329,6 @@ export const useCheatingDetector = ({
     confidenceScore,
     severityLevel,
     intentionalSwitchCount,
-    virtualDesktopCount,
     registerEvent,
     resetDetector,
   };
