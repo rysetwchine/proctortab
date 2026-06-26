@@ -40,8 +40,15 @@ export const useCheatingDetector = ({
   const [events, setEvents] = useState<ProctorEvent[]>([]);
   const [confidenceScore, setConfidenceScore] = useState(0);
   const [severityLevel, setSeverityLevel] = useState<SeverityLevel>('Informational');
-  
+
+  // Intentional tab switch counter (>3 seconds = intentional)
+  const [intentionalSwitchCount, setIntentionalSwitchCount] = useState(0);
+  const intentionalSwitchCountRef = useRef(0);
+  // Virtual desktop switch counter
+  const [virtualDesktopCount, setVirtualDesktopCount] = useState(0);
+
   const eventsRef = useRef<ProctorEvent[]>([]);
+  const autoSubmittedRef = useRef(false);
   const isQuiz = (assessment?.assessmentType || 'exam') === 'quiz';
 
   const registerEvent = useCallback(
@@ -51,21 +58,98 @@ export const useCheatingDetector = ({
         return;
       }
 
+      // Guard: if already auto-submitted, ignore further events
+      if (autoSubmittedRef.current) return;
+
       // Calculate score points for the event type
       let score = 5; // default minimal score
       let eventType = rawType;
 
-      if (rawType.toLowerCase().includes('tab')) {
+      const isTabEvent = rawType.toLowerCase().includes('tab');
+      const isVirtualDesktop = rawType.toLowerCase().includes('virtual') || rawType.toLowerCase().includes('desktop');
+
+      if (isTabEvent || isVirtualDesktop) {
         const secs = durationSeconds ?? 0;
         if (secs <= 1.5) {
           score = 8;
-          eventType = 'Accidental Tab Switch';
+          eventType = isVirtualDesktop ? 'Virtual Desktop Switch (Accidental)' : 'Accidental Tab Switch';
         } else if (secs <= 4) {
           score = 15;
-          eventType = 'Suspicious Tab Switch';
+          eventType = isVirtualDesktop ? 'Virtual Desktop Switch (Suspicious)' : 'Suspicious Tab Switch';
         } else {
           score = 30;
-          eventType = 'Intentional Tab Switch';
+          eventType = isVirtualDesktop ? 'Virtual Desktop Switch (Intentional)' : 'Intentional Tab Switch';
+        }
+
+        // ─── FEATURE: 3-Strike Intentional Switch Auto-Submit ────────────────
+        // An "intentional" event is any tab/desktop switch that lasted >3 seconds
+        if (secs > 3) {
+          const newCount = intentionalSwitchCountRef.current + 1;
+          intentionalSwitchCountRef.current = newCount;
+          setIntentionalSwitchCount(newCount);
+
+          if (newCount >= 3) {
+            // Third intentional switch — auto submit immediately
+            autoSubmittedRef.current = true;
+
+            // Log to Firestore before submitting
+            try {
+              const payload = {
+                studentId,
+                studentName,
+                course: examContext?.courseTitle || '',
+                assessmentId: examContext?.assessmentId || assessment?.id || 'unknown',
+                assessmentTitle: examContext?.examTitle || assessment?.title || 'Unknown Assessment',
+                timestamp: serverTimestamp(),
+                violationType: 'intentional_auto_submit',
+                evidence: `3rd intentional tab/virtual-desktop switch detected (${secs}s). Auto-submitted.`,
+                severityLevel: 'Confirmed Violation' as SeverityLevel,
+                confidenceScore: 100,
+                status: 'Violation',
+                autoSubmitted: true,
+                durationSeconds: secs,
+              };
+              await addDoc(collection(db, 'tab_logs'), payload);
+              await addDoc(collection(db, 'assessment_violations'), {
+                ...payload,
+                userId: studentId,
+                deductedMinutes: 0,
+              });
+              // RTDB alert
+              await set(ref(rtdb, 'alerts/student1/event'), 'tab_switch_3');
+              const cleanStudentId = String(studentId).replace(/[.#$/[\]]/g, '_');
+              await set(ref(rtdb, `alerts/${cleanStudentId}/event`), 'tab_switch_3');
+            } catch (err) {
+              console.warn('Could not log auto-submit event:', err);
+            }
+
+            onWarning(
+              '🚨 Assessment Auto-Submitted',
+              `You have been detected switching tabs or virtual desktops 3 times intentionally. Your ${isQuiz ? 'quiz' : 'assessment'} has been automatically submitted as per the exam policy.`,
+              0
+            );
+            onAutoSubmit();
+            return;
+          } else if (newCount === 2) {
+            // Second intentional switch — serious warning
+            onWarning(
+              '⚠️ Final Warning — 2nd Intentional Switch',
+              `This is your 2nd intentional tab/virtual-desktop switch. ONE MORE will automatically submit your ${isQuiz ? 'quiz' : 'assessment'}. Return to the exam window immediately.`,
+              isQuiz ? 300 : 600
+            );
+          } else if (newCount === 1) {
+            // First intentional switch — 1st warning
+            onWarning(
+              '⚠️ Warning — 1st Intentional Switch',
+              `An intentional tab/virtual-desktop switch was detected (${secs}s). You have 2 remaining chances before automatic submission. Please stay in the exam window.`,
+              isQuiz ? 180 : 300
+            );
+          }
+        }
+
+        // Track virtual desktop count separately for display
+        if (isVirtualDesktop) {
+          setVirtualDesktopCount((c) => c + 1);
         }
       } else if (rawType.toLowerCase().includes('fullscreen')) {
         score = 20;
@@ -101,9 +185,9 @@ export const useCheatingDetector = ({
       // 1. Calculate raw points sum
       const rawPointsSum = updatedEvents.reduce((sum, item) => sum + item.score, 0);
 
-      // 2. Synergy Bonus: If there are multiple distinct categories of violations (e.g. Tab switch AND Mouse exit)
+      // 2. Synergy Bonus: If there are multiple distinct categories of violations
       const uniqueTypes = new Set(updatedEvents.map(e => {
-        if (e.type.includes('Tab')) return 'Tab';
+        if (e.type.includes('Tab') || e.type.includes('Desktop')) return 'Tab';
         if (e.type.includes('Mouse')) return 'Mouse';
         if (e.type.includes('Fullscreen')) return 'Fullscreen';
         if (e.type.includes('Copy') || e.type.includes('Paste')) return 'Clipboard';
@@ -114,11 +198,9 @@ export const useCheatingDetector = ({
 
       const totalRawScore = rawPointsSum + synergyBonus;
 
-      // 3. Multi-Factor Safety Clause:
-      // A student must NEVER be classified as cheating (High Risk / Auto-Submit / Confirmed Violation) based on a single event.
+      // 3. Multi-Factor Safety Clause
       let finalConfidence = 0;
       if (updatedEvents.length === 1) {
-        // Cap confidence score at 25% (Low Risk) for a single isolated incident
         finalConfidence = Math.min(25, totalRawScore);
       } else {
         finalConfidence = Math.min(100, totalRawScore);
@@ -140,7 +222,7 @@ export const useCheatingDetector = ({
 
       setSeverityLevel(newSeverity);
 
-      // Map to old dashboard status ('Warning' | 'Suspicious' | 'Violation') for backward compatibility
+      // Map to old dashboard status for backward compatibility
       let legacyStatus: 'Warning' | 'Suspicious' | 'Violation' = 'Warning';
       if (newSeverity === 'Suspicious') {
         legacyStatus = 'Suspicious';
@@ -148,9 +230,9 @@ export const useCheatingDetector = ({
         legacyStatus = 'Violation';
       }
 
-      const autoSubmitted = newSeverity === 'Confirmed Violation';
+      const autoSubmittedFlag = newSeverity === 'Confirmed Violation';
 
-      // Log detailed violation data to Firestore collections
+      // Log detailed violation data to Firestore
       try {
         const payload = {
           studentId,
@@ -164,7 +246,7 @@ export const useCheatingDetector = ({
           severityLevel: newSeverity,
           confidenceScore: finalConfidence,
           status: legacyStatus,
-          autoSubmitted,
+          autoSubmitted: autoSubmittedFlag,
           durationSeconds: durationSeconds ?? 0,
           supportingEvents: updatedEvents.map(e => ({
             type: e.type,
@@ -174,10 +256,7 @@ export const useCheatingDetector = ({
           })),
         };
 
-        // Add doc to tab_logs to sync with existing proctor screens
         await addDoc(collection(db, 'tab_logs'), payload);
-        
-        // Also write to assessment_violations for unified alerts
         await addDoc(collection(db, 'assessment_violations'), {
           ...payload,
           userId: studentId,
@@ -185,11 +264,13 @@ export const useCheatingDetector = ({
           deductedMinutes: isQuiz ? (newSeverity === 'Suspicious' ? 5 : 3) : (newSeverity === 'Suspicious' ? 10 : 5),
         });
 
-        // Write to Firebase Realtime Database to alert the ESP32 hardware board in real-time
+        // Write to Firebase Realtime Database for ESP32 board
         let rtdbEvent = '';
         const lowerRaw = rawType.toLowerCase();
-        if (lowerRaw.includes('tab')) {
-          const tabSwitchesCount = updatedEvents.filter(e => e.type.toLowerCase().includes('tab')).length;
+        if (lowerRaw.includes('tab') || lowerRaw.includes('desktop')) {
+          const tabSwitchesCount = updatedEvents.filter(e =>
+            e.type.toLowerCase().includes('tab') || e.type.toLowerCase().includes('desktop')
+          ).length;
           if (tabSwitchesCount === 1) rtdbEvent = 'tab_switch_1';
           else if (tabSwitchesCount === 2) rtdbEvent = 'tab_switch_2';
           else rtdbEvent = 'tab_switch_3';
@@ -203,13 +284,9 @@ export const useCheatingDetector = ({
 
         if (rtdbEvent) {
           try {
-            // Write to fallback/generic 'student1' path for testing with ESP32 board
             await set(ref(rtdb, 'alerts/student1/event'), rtdbEvent);
-
-            // Write to student's dynamic path
-            const cleanStudentId = String(studentId).replace(/[.#$/\[\]]/g, '_');
+            const cleanStudentId = String(studentId).replace(/[.#$/[\]]/g, '_');
             await set(ref(rtdb, `alerts/${cleanStudentId}/event`), rtdbEvent);
-            console.log(`[RTDB Alert] Pushed "${rtdbEvent}" to alerts/student1/event and alerts/${cleanStudentId}/event`);
           } catch (rtdbErr) {
             console.warn('Could not write alert to Realtime Database:', rtdbErr);
           }
@@ -218,23 +295,25 @@ export const useCheatingDetector = ({
         console.warn('Could not log violation event to Firestore:', err);
       }
 
-      // Execute actions (Warnings or Auto-Submits) based on Severity
-      if (newSeverity === 'Confirmed Violation') {
+      // Execute actions based on Severity (only for non-intentional events that weren't already warned above)
+      const isIntentionalTabAlreadyHandled = (isTabEvent || isVirtualDesktop) && (durationSeconds ?? 0) > 3;
+
+      if (newSeverity === 'Confirmed Violation' && !autoSubmittedRef.current) {
+        autoSubmittedRef.current = true;
         onAutoSubmit();
-      } else {
+      } else if (!isIntentionalTabAlreadyHandled) {
         let penaltySeconds = 0;
         let warningMsg = '';
 
         if (newSeverity === 'Suspicious') {
-          penaltySeconds = isQuiz ? 300 : 600; // Quiz: 5 min, Exam: 10 min
+          penaltySeconds = isQuiz ? 300 : 600;
           warningMsg = `Repeated suspicious actions detected. Confidence: ${finalConfidence}%. ${isQuiz ? '5 minutes' : '10 minutes'} deducted from your timer. Please focus strictly on the exam window.`;
           onWarning(eventType, warningMsg, penaltySeconds);
         } else if (newSeverity === 'Warning') {
-          penaltySeconds = isQuiz ? 180 : 300; // Quiz: 3 min, Exam: 5 min
+          penaltySeconds = isQuiz ? 180 : 300;
           warningMsg = `Multiple unusual indicators detected. Confidence: ${finalConfidence}%. ${isQuiz ? '3 minutes' : '5 minutes'} deducted from your timer. Keep your focus on the page.`;
           onWarning(eventType, warningMsg, penaltySeconds);
         } else {
-          // Informational: no time deduction, just a subtle heads up
           warningMsg = `Reminder: Isolated activity detected (${eventType}). Keep your focus within the assessment window. Confidence: ${finalConfidence}% (Low Risk).`;
           onWarning(eventType, warningMsg, 0);
         }
@@ -245,15 +324,21 @@ export const useCheatingDetector = ({
 
   const resetDetector = useCallback(() => {
     eventsRef.current = [];
+    intentionalSwitchCountRef.current = 0;
+    autoSubmittedRef.current = false;
     setEvents([]);
     setConfidenceScore(0);
     setSeverityLevel('Informational');
+    setIntentionalSwitchCount(0);
+    setVirtualDesktopCount(0);
   }, []);
 
   return {
     events,
     confidenceScore,
     severityLevel,
+    intentionalSwitchCount,
+    virtualDesktopCount,
     registerEvent,
     resetDetector,
   };

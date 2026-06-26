@@ -21,7 +21,7 @@ export const AppSidebar = ({ activeTab, onTabChange, onLogout, isCollapsed = fal
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'courses', label: 'Courses', icon: GraduationCap },
     { id: 'attendance', label: 'Attendance', icon: ClipboardCheck },
-    { id: 'grades', label: 'Grades', icon: BookMarked },
+    { id: 'grades', label: 'Scores', icon: BookMarked },
     { id: 'reports', label: 'View Reports', icon: BarChart3 },
     { id: 'settings', label: 'Settings', icon: Settings },
   ];

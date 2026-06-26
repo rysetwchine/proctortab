@@ -12,6 +12,7 @@ import { useMouseBoundaryDetector } from '@/hooks/useMouseBoundaryDetector';
 import { useSettings } from '@/hooks/useSettings';
 import { useNetworkCompensation } from '@/hooks/useNetworkCompensation';
 import { useCheatingDetector } from '@/hooks/useCheatingDetector';
+import { useVirtualDesktopDetector } from '@/hooks/useVirtualDesktopDetector';
 import type { CourseAssessment } from '@/context/SessionContext';
 import { getExamDetectorRuntime } from '@/utils/examDetectorPolicy';
 import { prepareExamQuestions } from '@/utils/examSession';
@@ -25,6 +26,8 @@ import {
   Flag, 
   Save, 
   ShieldAlert,
+  Monitor,
+  X,
 } from 'lucide-react';
 import { MotionBackground } from '@/components/shared/MotionBackground';
 import {
@@ -108,13 +111,28 @@ export const ExamInterface = ({ onFinish, examContext, assessment }: ExamInterfa
   const isQuiz = (assessment?.assessmentType || 'exam') === 'quiz';
   const timerSeconds = Math.max((assessment?.duration ?? 30) * 60, 60);
 
+  const clearRtdbAlert = useCallback(async () => {
+    try {
+      const { rtdb } = await import('@/firebase');
+      const { ref, set } = await import('firebase/database');
+      await set(ref(rtdb, 'alerts/student1/event'), 'clear');
+      if (studentId) {
+        const cleanStudentId = String(studentId).replace(/[.#$/\[\]]/g, '_');
+        await set(ref(rtdb, `alerts/${cleanStudentId}/event`), 'clear');
+      }
+    } catch (e) {
+      console.warn('Could not clear RTDB alert:', e);
+    }
+  }, [studentId]);
+
   const handleExpire = useCallback(() => {
+    void clearRtdbAlert();
     onFinish({
       answers: answersRef.current,
       sessionQuestions: sessionQuestionsRef.current,
       violations: eventsRef.current,
     });
-  }, [onFinish]);
+  }, [onFinish, clearRtdbAlert]);
 
   const { formatTime, start, pause, deduct, compensate } = useExamTimer(timerSeconds, handleExpire);
 
@@ -195,11 +213,17 @@ export const ExamInterface = ({ onFinish, examContext, assessment }: ExamInterfa
     };
   }, [studentId, studentName, assessment, examContext]);
 
+  // Virtual desktop warning overlay state
+  const [showDesktopWarning, setShowDesktopWarning] = useState(false);
+  const [desktopWarningCount, setDesktopWarningCount] = useState(0);
+
   // Initialize unified anti-cheating verification system
   const {
     events,
     confidenceScore,
     severityLevel,
+    intentionalSwitchCount,
+    virtualDesktopCount,
     registerEvent,
   } = useCheatingDetector({
     // eventsRef is kept current via useEffect below
@@ -231,6 +255,27 @@ export const ExamInterface = ({ onFinish, examContext, assessment }: ExamInterfa
         deduct(penaltySeconds);
       }
     },
+  });
+
+  // Virtual desktop detection handler
+  const handleVirtualDesktopSuspected = useCallback(
+    (durationSeconds: number) => {
+      setDesktopWarningCount((c) => c + 1);
+      setShowDesktopWarning(true);
+      registerEvent(
+        'Virtual Desktop Switch',
+        `Suspected switch to a different virtual desktop (Desktop 2 / another workspace) for ${durationSeconds} second(s).`,
+        durationSeconds
+      );
+    },
+    [registerEvent]
+  );
+
+  // Virtual desktop switch detector hook
+  useVirtualDesktopDetector({
+    enabled: tabEnabled,
+    onVirtualDesktopSuspected: handleVirtualDesktopSuspected,
+    sharedLastViolationTimeRef: lastViolationTimeRef,
   });
 
   // Keep eventsRef always current so handleExpire can read it without referencing events before init
@@ -411,6 +456,11 @@ export const ExamInterface = ({ onFinish, examContext, assessment }: ExamInterfa
     };
   }, []);
 
+  // Reset hardware alerts on mount
+  useEffect(() => {
+    void clearRtdbAlert();
+  }, [clearRtdbAlert]);
+
   const currentQuestion = sessionQuestions[currentQuestionIndex];
   const totalQuestions = sessionQuestions.length;
   const isLastQuestion = currentQuestionIndex === totalQuestions - 1;
@@ -455,6 +505,7 @@ export const ExamInterface = ({ onFinish, examContext, assessment }: ExamInterfa
   const handleSubmit = () => {
     if (isExamDisabled) return;
     if (confirm('Are you sure you want to submit your assessment?')) {
+      void clearRtdbAlert();
       onFinish({ answers, sessionQuestions, violations: events });
     }
   };
@@ -583,6 +634,20 @@ export const ExamInterface = ({ onFinish, examContext, assessment }: ExamInterfa
                       {saveStatus === 'saving' ? 'Saving...' : 'Saved'}
                     </span>
                   </div>
+
+                  {/* ── Intentional Switch Counter Badge ── */}
+                  {intentionalSwitchCount > 0 && (
+                    <span
+                      className={`inline-flex items-center gap-1 text-[9px] font-black px-2 py-0.5 rounded-full border uppercase tracking-wider ${
+                        intentionalSwitchCount >= 2
+                          ? 'border-rose-500/60 text-rose-400 bg-rose-500/10 animate-pulse shadow-[0_0_10px_rgba(239,68,68,0.3)]'
+                          : 'border-amber-500/50 text-amber-400 bg-amber-500/8'
+                      }`}
+                    >
+                      <AlertTriangle className="w-2.5 h-2.5" />
+                      Intentional Switches: {intentionalSwitchCount}/3
+                    </span>
+                  )}
                 </div>
 
                 <h1 className="text-xl font-black text-white uppercase tracking-wide">
@@ -751,12 +816,90 @@ export const ExamInterface = ({ onFinish, examContext, assessment }: ExamInterfa
         message={warningMessage}
         onClose={() => {
           setShowWarning(false);
+          void clearRtdbAlert();
           // Re-enable fullscreen if wantFullscreen is enabled and we are not in fullscreen
           if (wantFullscreen && !document.fullscreenElement) {
             document.documentElement.requestFullscreen().catch(() => {});
           }
         }}
       />
+
+      {/* ═══ VIRTUAL DESKTOP / MULTI-DESKTOP WARNING OVERLAY ═══ */}
+      {showDesktopWarning && (
+        <div
+          className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
+          style={{ background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(16px)' }}
+        >
+          <div
+            className="relative w-full max-w-lg rounded-3xl overflow-hidden shadow-[0_0_80px_rgba(239,68,68,0.4)] border border-rose-500/50 animate-in zoom-in-90 duration-200"
+            style={{ background: 'linear-gradient(135deg, rgba(20,5,5,0.97) 0%, rgba(40,8,8,0.95) 100%)' }}
+          >
+            {/* Red shimmer top */}
+            <div className="h-1 w-full bg-gradient-to-r from-rose-700 via-red-500 to-rose-700" />
+
+            <div className="p-7 space-y-5">
+              {/* Icon + heading */}
+              <div className="flex items-start gap-4">
+                <div className="flex-shrink-0 w-14 h-14 rounded-2xl bg-rose-500/15 border border-rose-500/35 flex items-center justify-center shadow-[0_0_20px_rgba(239,68,68,0.25)]">
+                  <Monitor className="w-7 h-7 text-rose-400" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-rose-500/80 mb-1">ProctorTab Security Alert</p>
+                  <h2 className="text-xl font-black text-white leading-tight">Multi-Desktop Activity Detected</h2>
+                  <p className="text-xs text-rose-400/80 mt-1 font-semibold">Detection #{desktopWarningCount}</p>
+                </div>
+                <button
+                  onClick={() => setShowDesktopWarning(false)}
+                  className="flex-shrink-0 w-8 h-8 rounded-lg bg-slate-800/60 border border-slate-700/50 flex items-center justify-center text-slate-400 hover:text-white hover:bg-slate-700/60 transition-all"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Alert message */}
+              <div className="rounded-2xl border border-rose-500/25 bg-rose-500/5 p-4 space-y-2">
+                <p className="text-sm text-slate-200 leading-relaxed">
+                  The system has detected that you switched to a <strong className="text-rose-300">different virtual desktop</strong> (e.g., Desktop 2, Task View, or macOS Spaces) while this exam was active.
+                </p>
+                <p className="text-xs text-slate-400 leading-relaxed">
+                  This has been <strong className="text-rose-400">flagged and logged</strong> to your instructor's monitoring dashboard. Multiple occurrences may result in automatic submission.
+                </p>
+              </div>
+
+              {/* Violation counter */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="bg-slate-900/50 border border-slate-800/60 rounded-xl p-3 text-center">
+                  <p className="text-[10px] uppercase tracking-widest text-slate-500 font-bold">Desktop Switches</p>
+                  <p className="text-2xl font-black text-rose-400 mt-1">{virtualDesktopCount}</p>
+                </div>
+                <div className="bg-slate-900/50 border border-slate-800/60 rounded-xl p-3 text-center">
+                  <p className="text-[10px] uppercase tracking-widest text-slate-500 font-bold">Intentional Switches</p>
+                  <p className={`text-2xl font-black mt-1 ${intentionalSwitchCount >= 2 ? 'text-rose-400 animate-pulse' : 'text-amber-400'}`}>
+                    {intentionalSwitchCount}<span className="text-sm text-slate-500">/3</span>
+                  </p>
+                </div>
+              </div>
+
+              {/* Warning level */}
+              <div className="flex items-center gap-3 text-xs text-slate-400 bg-slate-950/40 border border-slate-800/50 rounded-xl p-3">
+                <AlertTriangle className="w-4 h-4 text-amber-400 flex-shrink-0" />
+                <span>
+                  <strong className="text-white">Reminder:</strong> You must remain on this exam page at all times. Switching virtual desktops, opening other applications, or leaving the browser will be recorded as a violation.
+                </span>
+              </div>
+
+              {/* Dismiss button */}
+              <button
+                onClick={() => setShowDesktopWarning(false)}
+                className="w-full h-11 rounded-xl font-bold text-sm text-white transition-all hover:scale-[1.02] active:scale-[0.98]"
+                style={{ background: 'linear-gradient(135deg, #dc2626 0%, #b91c1c 100%)', boxShadow: '0 0 20px rgba(220,38,38,0.25)' }}
+              >
+                I Understand — Return to Exam
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </MotionBackground>
   );
 };
