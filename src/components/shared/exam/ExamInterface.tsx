@@ -521,7 +521,6 @@ export const ExamInterface = ({ onFinish, examContext, assessment }: ExamInterfa
     );
   }
 
-  const studentNumber = userProfile?.studentNumber || 'N/A';
   const currentTimeStr = `${String(currentTime.getHours()).padStart(2, '0')}:${String(currentTime.getMinutes()).padStart(2, '0')}:${String(currentTime.getSeconds()).padStart(2, '0')}`;
 
   return (
