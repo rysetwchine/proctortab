@@ -68,12 +68,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     };
   }, []);
 
-  // IMPORTANT:
-  // This project uses a local (non-Firebase) login state for UI, but Firebase Storage/Firestore
-  // security rules commonly require `request.auth != null`.
-  // To make Learning Module PDF upload/view work in dev without touching the PDF extraction system,
-  // we sign in anonymously to Firebase in the background.
   useEffect(() => {
+    // If a user is already logged in locally, do NOT sign in anonymously.
+    // Let Firebase Auth restore the authenticated session.
+    const stored = localStorage.getItem("user");
+    if (stored) return;
+
     if (auth.currentUser) return;
     signInAnonymously(auth).catch((e) => {
       // If anonymous auth is disabled in Firebase console, uploads will still fail with 401/403
