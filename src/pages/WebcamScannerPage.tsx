@@ -144,12 +144,13 @@ export default function WebcamScannerPage() {
     }
 
     // Duplicate check
-    const alreadyIn = logsRef.current.some(
+    const existingLog = logsRef.current.find(
       (l) => String(l.studentId) === String(payload.uid) && String(l.courseId) === String(selectedCourseId) && l.date === today
     );
-    if (alreadyIn) {
-      setScanHistory((h) => [{ id: scanId, name: payload.name, status: 'error', message: 'Already checked in today.', time: timeStr }, ...h.slice(0, 19)]);
-      toast.error(`${payload.name} already checked in today.`);
+    if (existingLog) {
+      const errMsg = `INVALID: Checked in today at ${existingLog.time}`;
+      setScanHistory((h) => [{ id: scanId, name: payload.name, status: 'error', message: errMsg, time: timeStr }, ...h.slice(0, 19)]);
+      toast.error(`${payload.name} has ALREADY checked in today at ${existingLog.time}!`);
       setIsSaving(false);
       return;
     }
@@ -159,8 +160,9 @@ export default function WebcamScannerPage() {
       const cId = selectedCourseId;
       const cName = course?.title || 'Unknown Course';
       await recordAttendance(cId, payload, 'Professor', cName, scannerStatus, '');
-      setScanHistory((h) => [{ id: scanId, name: payload.name, status: 'success', message: `Marked ${scannerStatus} ✓`, time: timeStr }, ...h.slice(0, 19)]);
-      toast.success(`${payload.name} marked ${scannerStatus}.`);
+      const successMsg = `Marked ${scannerStatus} at ${timeStr} (${today}) ✓`;
+      setScanHistory((h) => [{ id: scanId, name: payload.name, status: 'success', message: successMsg, time: timeStr }, ...h.slice(0, 19)]);
+      toast.success(`${payload.name} marked ${scannerStatus} at ${timeStr} (${today})`);
     } catch {
       setScanHistory((h) => [{ id: scanId, name: payload.name, status: 'error', message: 'Database error. Try again.', time: timeStr }, ...h.slice(0, 19)]);
       toast.error('Failed to save attendance.');
