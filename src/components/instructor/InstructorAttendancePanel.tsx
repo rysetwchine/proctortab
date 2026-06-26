@@ -20,7 +20,7 @@ import {
   deleteAttendanceRecord
 } from '@/utils/attendanceFirestore';
 import { parseAttendanceQr } from '@/utils/attendanceQr';
-import { formatCameraError } from '@/utils/attendanceCamera';
+import { formatCameraError, waitForScannerMount } from '@/utils/attendanceCamera';
 import type { AttendanceLog, AttendanceStatus } from '@/types/attendance';
 import { MotionBackground } from '@/components/shared/MotionBackground';
 
@@ -255,17 +255,40 @@ export function InstructorAttendancePanel() {
     setLastScanResult(null);
 
     try {
+      // Step 1: Pre-flight — confirm browser can open the camera stream before html5qrcode tries
+      const preStream = await navigator.mediaDevices.getUserMedia({ video: { deviceId: { exact: selectedCameraId } }, audio: false });
+      preStream.getTracks().forEach((t) => t.stop()); // release immediately
+
+      // Step 2: Stop any existing scanner instance
       await stopCamera();
+
+      // Step 3: Give React a tick to flush the 'loading' state so the scanner div becomes visible in DOM
+      await new Promise<void>((resolve) => setTimeout(resolve, 80));
+
+      // Step 4: Wait for the DOM element to be painted with real pixel dimensions
+      const el = await waitForScannerMount(SCANNER_ELEMENT_ID, 60);
+      const containerW = el.offsetWidth;
+      const containerH = el.offsetHeight;
+      const boxSize = Math.min(Math.floor(Math.min(containerW, containerH) * 0.75), 300);
+
+      // Step 5: Create scanner and start
       const scanner = new Html5Qrcode(SCANNER_ELEMENT_ID, { verbose: false });
       scannerRef.current = scanner;
 
       await scanner.start(
         selectedCameraId,
-        { fps: 10, qrbox: 260 },
+        {
+          fps: 10,
+          qrbox: { width: boxSize, height: boxSize },
+          aspectRatio: containerW / containerH,
+          videoConstraints: {
+            deviceId: { exact: selectedCameraId },
+            width: { ideal: containerW },
+            height: { ideal: containerH },
+          },
+        },
         (text) => void handleDecodedQr(text),
-        () => {
-          // Silent scan failure
-        }
+        () => { /* silent scan failure */ }
       );
       setScannerPhase('scanning');
     } catch (err: any) {
