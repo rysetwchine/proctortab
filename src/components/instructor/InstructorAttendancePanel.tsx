@@ -20,6 +20,7 @@ import {
   deleteAttendanceRecord
 } from '@/utils/attendanceFirestore';
 import { parseAttendanceQr } from '@/utils/attendanceQr';
+import { formatCameraError } from '@/utils/attendanceCamera';
 import type { AttendanceLog, AttendanceStatus } from '@/types/attendance';
 import { MotionBackground } from '@/components/shared/MotionBackground';
 
@@ -269,7 +270,7 @@ export function InstructorAttendancePanel() {
       setScannerPhase('scanning');
     } catch (err: any) {
       console.error('Failed to start webcam scanner:', err);
-      setCameraError(err.message || 'Webcam initialization failed.');
+      setCameraError(formatCameraError(err));
       setScannerPhase('error');
       await stopCamera();
     }
