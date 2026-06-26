@@ -699,9 +699,9 @@ export function InstructorAttendancePanel() {
               )}
 
               {/* Viewport Frame */}
-              <div className="relative w-full overflow-hidden rounded-3xl border border-slate-800 bg-slate-950/60 aspect-[4/3] flex items-center justify-center">
+              <div className="relative w-full overflow-hidden rounded-3xl border border-slate-800 bg-slate-950/60 aspect-[4/3]">
                 {scannerPhase === 'idle' && (
-                  <div className="text-center p-6 space-y-2">
+                  <div className="absolute inset-0 flex flex-col items-center justify-center p-6 space-y-2 text-center">
                     <Camera className="w-12 h-12 text-slate-600 mx-auto" />
                     <p className="text-xs text-slate-500">Camera is currently offline. Press "Start Camera" to begin scanning.</p>
                   </div>
@@ -720,7 +720,7 @@ export function InstructorAttendancePanel() {
                 )}
 
                 {/* Html5Qrcode video attaches here */}
-                <div id={SCANNER_ELEMENT_ID} className={`w-full h-full [&_video]:!block [&_video]:w-full [&_video]:h-full [&_img]:hidden ${scannerPhase !== 'idle' ? 'block' : 'hidden'}`} />
+                <div id={SCANNER_ELEMENT_ID} className={`absolute inset-0 !w-full !h-full [&_video]:!block [&_video]:!w-full [&_video]:!h-full [&_video]:object-cover [&_img]:hidden ${scannerPhase !== 'idle' ? 'block' : 'hidden'}`} />
               </div>
             </Card>
 
