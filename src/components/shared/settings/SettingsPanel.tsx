@@ -113,6 +113,7 @@ export const SettingsPanel = () => {
         email: profile.email,
         course: profile.course,
         year: profile.year,
+        program: profile.program,
       };
       localStorage.setItem("user", JSON.stringify(updatedUser));
       localStorage.removeItem("userProfile");

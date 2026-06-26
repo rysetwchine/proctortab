@@ -20,11 +20,20 @@ export function StudentAttendancePanel() {
   const studentId = resolveEnrollmentStudentId(user);
   const userProfile = useMemo(() => {
     try {
-      return JSON.parse(localStorage.getItem('userProfile') || '{}');
+      const u = JSON.parse(localStorage.getItem('user') || '{}');
+      const up = JSON.parse(localStorage.getItem('userProfile') || '{}');
+      return {
+        name: u.name || up.name || '',
+        studentNumber: u.studentNumber || up.studentNumber || '',
+        email: u.email || up.email || '',
+        course: u.course || up.course || '',
+        year: u.year || up.year || '',
+        program: u.program || up.program || '',
+      };
     } catch {
       return {};
     }
-  }, []);
+  }, [user]);
 
   const [activeSubTab, setActiveSubTab] = useState<ActiveTabType>('qr');
   const [qrDataUrl, setQrDataUrl] = useState<string>('');
