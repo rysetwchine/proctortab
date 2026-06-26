@@ -139,7 +139,7 @@ export const useCheatingDetector = ({
             onWarning(
               '⚠️ Warning — 1st Intentional Switch',
               `An intentional tab/virtual-desktop switch was detected (${secs}s). You have 2 remaining chances before automatic submission. Please stay in the exam window.`,
-              isQuiz ? 180 : 300
+              isQuiz ? 300 : 600
             );
           }
         }
@@ -253,7 +253,7 @@ export const useCheatingDetector = ({
           ...payload,
           userId: studentId,
           violationType: eventType.toLowerCase().replace(/\s+/g, '_'),
-          deductedMinutes: isQuiz ? (newSeverity === 'Suspicious' ? 5 : 3) : (newSeverity === 'Suspicious' ? 10 : 5),
+          deductedMinutes: isQuiz ? 5 : 10,
         });
 
         // Write to Firebase Realtime Database for ESP32 board
@@ -294,21 +294,9 @@ export const useCheatingDetector = ({
         autoSubmittedRef.current = true;
         onAutoSubmit();
       } else if (!isIntentionalTabAlreadyHandled) {
-        let penaltySeconds = 0;
-        let warningMsg = '';
-
-        if (newSeverity === 'Suspicious') {
-          penaltySeconds = isQuiz ? 300 : 600;
-          warningMsg = `Repeated suspicious actions detected. Confidence: ${finalConfidence}%. ${isQuiz ? '5 minutes' : '10 minutes'} deducted from your timer. Please focus strictly on the exam window.`;
-          onWarning(eventType, warningMsg, penaltySeconds);
-        } else if (newSeverity === 'Warning') {
-          penaltySeconds = isQuiz ? 180 : 300;
-          warningMsg = `Multiple unusual indicators detected. Confidence: ${finalConfidence}%. ${isQuiz ? '3 minutes' : '5 minutes'} deducted from your timer. Keep your focus on the page.`;
-          onWarning(eventType, warningMsg, penaltySeconds);
-        } else {
-          warningMsg = `Reminder: Isolated activity detected (${eventType}). Keep your focus within the assessment window. Confidence: ${finalConfidence}% (Low Risk).`;
-          onWarning(eventType, warningMsg, 0);
-        }
+        const penaltySeconds = isQuiz ? 300 : 600;
+        const warningMsg = `Warning: ${eventType} detected. ${isQuiz ? '5 minutes' : '10 minutes'} deducted from your timer. Please focus strictly on the exam window.`;
+        onWarning(eventType, warningMsg, penaltySeconds);
       }
     },
     [studentId, studentName, assessment, examContext, isOnline, isQuiz, onAutoSubmit, onWarning]

@@ -64,9 +64,30 @@ export const ExamInterface = ({ onFinish, examContext, assessment }: ExamInterfa
   const [currentTime, setCurrentTime] = useState(() => new Date());
   const [sessionBlock, setSessionBlock] = useState<{ isBlocked: boolean; reason?: string }>({ isBlocked: false });
   const [saveStatus, setSaveStatus] = useState<'saving' | 'saved'>('saved');
-  // Multi-desktop warning overlay state
   const [showDesktopWarning, setShowDesktopWarning] = useState(false);
   const [desktopWarningCount, setDesktopWarningCount] = useState(0);
+
+  // Dynamic watermark state and triggers
+  const [isWatermarkProminent, setIsWatermarkProminent] = useState(false);
+  const watermarkTimeoutRef = useRef<number | null>(null);
+
+  const triggerWatermarkProminent = useCallback(() => {
+    setIsWatermarkProminent(true);
+    if (watermarkTimeoutRef.current) {
+      window.clearTimeout(watermarkTimeoutRef.current);
+    }
+    watermarkTimeoutRef.current = window.setTimeout(() => {
+      setIsWatermarkProminent(false);
+    }, 5000);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (watermarkTimeoutRef.current) {
+        window.clearTimeout(watermarkTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const { settings } = useSettings();
   const answersRef = useRef(answers);
@@ -318,6 +339,71 @@ export const ExamInterface = ({ onFinish, examContext, assessment }: ExamInterfa
     };
   }, [studentId, assessment?.id]);
 
+  // Background interval for continuous time deduction while student is away in another tab
+  useEffect(() => {
+    if (!tabEnabled || isExamDisabled || isAutoSubmitted) return;
+
+    let backgroundInterval: number | null = null;
+    let leaveTimestamp = 0;
+    let totalDeductionsApplied = 0;
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        leaveTimestamp = Date.now();
+        totalDeductionsApplied = 0;
+        
+        backgroundInterval = window.setInterval(() => {
+          const elapsedSeconds = Math.floor((Date.now() - leaveTimestamp) / 1000);
+          const expectedDeductions = Math.floor(elapsedSeconds / 10);
+          
+          if (expectedDeductions > totalDeductionsApplied) {
+            const newDeductions = expectedDeductions - totalDeductionsApplied;
+            totalDeductionsApplied = expectedDeductions;
+            
+            const deductionAmount = (isQuiz ? 300 : 600) * newDeductions;
+            deduct(deductionAmount);
+            
+            registerEvent(
+              'Continuous Tab Switch Penalty',
+              `Remained in another tab/window for ${expectedDeductions * 10}s. Continuous deduction of ${isQuiz ? '5 mins' : '10 mins'} applied.`
+            );
+          }
+        }, 1000);
+      } else {
+        if (leaveTimestamp > 0) {
+          const elapsedSeconds = Math.floor((Date.now() - leaveTimestamp) / 1000);
+          const expectedDeductions = Math.floor(elapsedSeconds / 10);
+          
+          if (expectedDeductions > totalDeductionsApplied) {
+            const newDeductions = expectedDeductions - totalDeductionsApplied;
+            const deductionAmount = (isQuiz ? 300 : 600) * newDeductions;
+            deduct(deductionAmount);
+            
+            registerEvent(
+              'Continuous Tab Switch Penalty',
+              `Remained in another tab/window for ${expectedDeductions * 10}s. Applied final catch-up deduction.`
+            );
+          }
+        }
+        
+        if (backgroundInterval) {
+          window.clearInterval(backgroundInterval);
+          backgroundInterval = null;
+        }
+        leaveTimestamp = 0;
+        totalDeductionsApplied = 0;
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      if (backgroundInterval) {
+        window.clearInterval(backgroundInterval);
+      }
+    };
+  }, [tabEnabled, isExamDisabled, isAutoSubmitted, isQuiz, deduct, registerEvent]);
+
   // ─── Multi-Desktop / Virtual Desktop Overlay ────────────────────────────
   // We detect virtual desktop switches by listening to visibilitychange.
   // A separate listener here ONLY shows the visual warning overlay.
@@ -372,6 +458,7 @@ export const ExamInterface = ({ onFinish, examContext, assessment }: ExamInterfa
         'Mouse Exit',
         `Moved cursor outside browser workspace boundaries (X: ${pos.x}, Y: ${pos.y}).`
       );
+      triggerWatermarkProminent();
     }
   });
 
@@ -424,6 +511,7 @@ export const ExamInterface = ({ onFinish, examContext, assessment }: ExamInterfa
 
     const handleScreenshotAttempt = (details: string) => {
       registerEvent('Screenshot Attempt', details);
+      triggerWatermarkProminent();
       
       // Overwrite Clipboard with Watermark text
       try {
@@ -638,15 +726,19 @@ export const ExamInterface = ({ onFinish, examContext, assessment }: ExamInterfa
   return (
     <MotionBackground>
       {/* Screenshot protection watermark */}
-      {settings.screenshotProtection && (
-        <div className="fixed inset-0 pointer-events-none z-[45] overflow-hidden select-none opacity-[0.16]">
+      {(settings.screenshotProtection || isWatermarkProminent) && (
+        <div className={`fixed inset-0 pointer-events-none z-[45] overflow-hidden select-none transition-all duration-300 ${
+          isWatermarkProminent 
+            ? 'opacity-[0.80] bg-red-500/10' 
+            : 'opacity-[0.16]'
+        }`}>
           <svg className="w-full h-full" style={{ pointerEvents: 'none' }} preserveAspectRatio="xMidYMid slice">
             <defs>
               <pattern id="watermark-exam" x="0" y="0" width="220" height="220" patternUnits="userSpaceOnUse">
                 <g transform="rotate(-40 110 110)">
-                  <text x="110" y="80" textAnchor="middle" fontSize="14" fontFamily="monospace" fontWeight="600" fill="white">{studentName}</text>
-                  <text x="110" y="105" textAnchor="middle" fontSize="12" fontFamily="monospace" fill="white">#{studentNumber}</text>
-                  <text x="110" y="130" textAnchor="middle" fontSize="11" fontFamily="monospace" fill="white">{currentTimeStr}</text>
+                  <text x="110" y="80" textAnchor="middle" fontSize="14" fontFamily="monospace" fontWeight="600" fill={isWatermarkProminent ? "#ef4444" : "white"}>{studentName}</text>
+                  <text x="110" y="105" textAnchor="middle" fontSize="12" fontFamily="monospace" fill={isWatermarkProminent ? "#ef4444" : "white"}>#{studentNumber}</text>
+                  <text x="110" y="130" textAnchor="middle" fontSize="11" fontFamily="monospace" fill={isWatermarkProminent ? "#ef4444" : "white"}>{currentTimeStr}</text>
                 </g>
               </pattern>
             </defs>
