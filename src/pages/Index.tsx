@@ -1,8 +1,6 @@
 import { useEffect, useState } from 'react';
-import { AuthProvider } from '@/context/AuthContext';
 import { SettingsProvider } from '@/context/SettingsContext';
 import { AssessmentProvider } from '@/context/AssesmentContext';
-import { SessionProvider } from '@/context/SessionContext';
 import type { CourseExamLaunch } from '@/context/SessionContext';
 
 import { LoginScreen } from '@/components/auth/LoginScreen';
@@ -313,15 +311,11 @@ const handleLogout = async () => {
 
 const Index = () => {
   return (
-    <AuthProvider>
-      <SessionProvider>
-        <SettingsProvider>
-          <AssessmentProvider>
-            <InnerAppContent />
-          </AssessmentProvider>
-        </SettingsProvider>
-      </SessionProvider>
-    </AuthProvider>
+    <SettingsProvider>
+      <AssessmentProvider>
+        <InnerAppContent />
+      </AssessmentProvider>
+    </SettingsProvider>
   );
 };
 
