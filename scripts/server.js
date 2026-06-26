@@ -16,34 +16,72 @@ app.use(express.json());
 
 let port = null;
 let isConnected = false;
+let reconnectTimer = null;
 
-// 🔌 Initialize Arduino Connection
+// 🔌 Initialize Arduino Connection with 5-Second Reconnect Loop
 function initializeArduino() {
+  if (isConnected && port && port.isOpen) return;
+
+  console.log('🔌 Attempting to connect to Arduino on COM3...');
   try {
+    if (port) {
+      try {
+        port.close();
+      } catch (e) {
+        // ignore
+      }
+      port = null;
+    }
+
     port = new SerialPort({
       path: 'COM3', 
       baudRate: 9600,
-      autoOpen: true
+      autoOpen: false
+    });
+
+    port.open((err) => {
+      if (err) {
+        console.log('❌ Arduino Open Error:', err.message);
+        isConnected = false;
+        scheduleReconnect();
+      }
     });
 
     port.on('open', () => {
-      console.log('✅ Arduino Connected!');
+      console.log('✅ Arduino Connected on COM3!');
       isConnected = true;
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+      }
     });
 
     port.on('error', (err) => {
-      console.log('❌ Arduino Connection Error:', err.message);
+      console.log('❌ Arduino SerialPort Error:', err.message);
       isConnected = false;
+      scheduleReconnect();
     });
 
     port.on('close', () => {
-      console.log('⚠️ Arduino Disconnected');
+      console.log('⚠️ Arduino Connection Closed');
       isConnected = false;
+      scheduleReconnect();
     });
 
   } catch (err) {
-    console.log('Error initializing Arduino:', err.message);
+    console.log('❌ Error initializing Arduino:', err.message);
+    isConnected = false;
+    scheduleReconnect();
   }
+}
+
+function scheduleReconnect() {
+  if (reconnectTimer) return;
+  console.log('🔄 Scheduling Arduino reconnection on COM3 in 5 seconds...');
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    initializeArduino();
+  }, 5000);
 }
 
 // 📡 API Endpoint: Check Connection Status
@@ -58,6 +96,22 @@ app.get('/api/arduino-status', (req, res) => {
 app.post('/api/trigger-alarm', (req, res) => {
   const { type = 'cheating', duration = 3 } = req.body;
 
+  // Validate alarm command arguments before sending
+  if (typeof type !== 'string' || !/^[a-zA-Z0-9_-]+$/.test(type)) {
+    return res.status(400).json({
+      success: false,
+      message: 'Invalid alarm type (must be alphanumeric/dash/underscore)'
+    });
+  }
+
+  const parsedDuration = parseInt(duration, 10);
+  if (isNaN(parsedDuration) || parsedDuration <= 0 || parsedDuration > 60) {
+    return res.status(400).json({
+      success: false,
+      message: 'Invalid alarm duration (must be a positive integer between 1 and 60)'
+    });
+  }
+
   if (!isConnected) {
     return res.status(400).json({
       success: false,
@@ -66,11 +120,11 @@ app.post('/api/trigger-alarm', (req, res) => {
   }
 
   try {
-    // Send command to Arduino
-    const command = `ALARM:${type}:${duration}\n`;
+    // Send validated command to Arduino
+    const command = `ALARM:${type}:${parsedDuration}\n`;
     port.write(command);
 
-    console.log(`🚨 Alarm Triggered: ${type} (${duration}s)`);
+    console.log(`🚨 Alarm Triggered: ${type} (${parsedDuration}s)`);
 
     res.json({
       success: true,

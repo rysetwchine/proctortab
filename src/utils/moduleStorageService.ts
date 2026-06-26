@@ -49,6 +49,16 @@ export async function uploadModuleFile(
   );
   console.log(`[UploadModule] File MIME type: ${file.type}`);
 
+  // Convert file to base64 dataUrl so it can be viewed inline by students/instructors in dev mode
+  const fileToDataUrl = (f: File): Promise<string> => {
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result as string);
+      reader.readAsDataURL(f);
+    });
+  };
+  const dataUrl = await fileToDataUrl(file);
+
   try {
     // For PDFs, use advanced extraction with OCR support
     let fileContent = '';
@@ -210,6 +220,7 @@ export async function uploadModuleFile(
       mimeType: file.type,
       fileSize: file.size,
       fileContent: preferredQuestionContent, // keep best available extracted content in session
+      dataUrl, // Save base64 dataUrl for offline/dev viewing
       storageUrl: `courses/${courseId}/modules/${moduleId}/${file.name}`,
       uploadStatus: 'uploaded',
       uploadedAt: new Date(),
@@ -251,6 +262,7 @@ export async function uploadModuleFile(
         type: moduleItem.type,
         mimeType: moduleItem.mimeType,
         fileSize: moduleItem.fileSize,
+        dataUrl, // Store base64 dataUrl in Firestore doc
         // ⭐ Store the extracted content for question generation
         fileContent: preferredQuestionContent,
         // ⭐ New: Store CLEANED + STRUCTURED knowledge for high-quality exam generation
@@ -571,6 +583,7 @@ export async function loadModulesFromFirestore(
                 fileContent: preferredContent,
                 fileSize: contentData.fileSize || 0,
                 mimeType: contentData.mimeType,
+                dataUrl: contentData.dataUrl,
                 uploadedAt: contentData.uploadedAt ? new Date(contentData.uploadedAt.toMillis?.() || contentData.uploadedAt) : new Date(),
                 _hasExtractedContent: preferredContent.length > 50,
                 _contentLength: preferredContent.length,
@@ -586,10 +599,8 @@ export async function loadModulesFromFirestore(
           console.warn(`[LoadModules] │  Failed to check subcollection:`, error);
         }
       }
-      
       modules.push(moduleData);
     }
-
     console.log(`[LoadModules] ✅ Loaded ${modules.length} modules with hydrated content from Firestore`);
     return modules;
   } catch (error) {
@@ -597,7 +608,6 @@ export async function loadModulesFromFirestore(
     return [];
   }
 }
-
 /**
  * Get single module from Firestore
  * CRITICAL: Also loads and hydrates extracted content for items from subcollection

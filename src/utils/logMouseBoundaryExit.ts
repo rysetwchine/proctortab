@@ -15,6 +15,8 @@ export interface MouseBoundaryExitLogParams {
   assessmentTitle?: string;
   deductedMinutes: number;
   cursorPosition: CursorPosition;
+  confidenceScore?: number; // 0-100 confidence level
+  patternType?: 'accidental' | 'suspicious' | 'intentional';
 }
 
 export async function logMouseBoundaryExit(params: MouseBoundaryExitLogParams) {
@@ -29,6 +31,8 @@ export async function logMouseBoundaryExit(params: MouseBoundaryExitLogParams) {
       violationType: "mouse_boundary_exit",
       deductedMinutes: params.deductedMinutes,
       cursorPosition: params.cursorPosition,
+      confidenceScore: params.confidenceScore ?? 100,
+      patternType: params.patternType ?? 'intentional',
       timestamp: serverTimestamp(),
     });
   } catch (error) {

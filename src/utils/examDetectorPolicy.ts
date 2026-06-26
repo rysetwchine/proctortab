@@ -6,6 +6,8 @@ export type ExamDetectorRuntime = {
   copyPasteEnabled: boolean;
   fullscreenExitEnabled: boolean;
   wantFullscreen: boolean;
+  screenshotEnabled: boolean;
+  alarmEnabled: boolean;
 };
 
 /**
@@ -39,18 +41,24 @@ export function getExamDetectorRuntime(
       copyPasteEnabled: settings.copyPasteProtection,
       fullscreenExitEnabled: settings.fullScreenMode,
       wantFullscreen: settings.fullScreenMode,
+      screenshotEnabled: settings.screenshotProtection,
+      alarmEnabled: settings.alarmDevice,
     };
   }
 
   const tab = legacy ? legacy.tabSwitch : detectors.tabSwitch;
   const copy = legacy ? legacy.copyPaste : detectors.copyPaste;
   const fs = legacy ? legacy.fullscreenExit : detectors.fullscreen;
+  const screenshot = detectors.screenshot ?? false;
+  const alarm = detectors.alarm ?? false;
 
   return {
     tabEnabled: Boolean(tab),
     copyPasteEnabled: Boolean(copy),
     fullscreenExitEnabled: Boolean(fs),
     wantFullscreen: Boolean(fs),
+    screenshotEnabled: Boolean(screenshot),
+    alarmEnabled: Boolean(alarm),
   };
 }
 

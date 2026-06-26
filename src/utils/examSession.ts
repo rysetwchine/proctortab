@@ -13,7 +13,7 @@ function shuffle<T>(items: T[], seed: string): T[] {
   }
   for (let i = arr.length - 1; i > 0; i -= 1) {
     h = (h * 9301 + 49297) % 233280;
-    const j = h % (i + 1);
+    const j = Math.abs(h) % (i + 1);
     [arr[i], arr[j]] = [arr[j], arr[i]];
   }
   return arr;

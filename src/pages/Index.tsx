@@ -7,26 +7,32 @@ import type { CourseExamLaunch } from '@/context/SessionContext';
 
 import { LoginScreen } from '@/components/auth/LoginScreen';
 import { RegisterScreen } from '@/components/auth/RegisterScreen';
-import { AppLayout } from '@/components/layout/AppLayout';
-import { InstructorDashboard } from '@/components/dashboard/InstructorDashboard';
-import { StudentDashboard } from '@/components/dashboard/StudentsDashboard';
-import { ExamInstructions } from '@/components/exam/ExamInstruction';
-import { ExamInterface } from '@/components/exam/ExamInterface';
-import type { ExamFinishPayload } from '@/components/exam/ExamInterface';
-import { ScoreDisplay } from '@/components/exam/ScoreDisplay';
-import { SettingsPanel } from '@/components/settings/SettingsPanel';
-import { ReportsPanel } from '@/components/reports/ReporstPanel';
-import { CoursesPanel } from '@/components/courses/CoursesDetails';
-import { ModulesPanel } from '@/components/modules/ModulewsPAnel';
-import { ToolsPanel } from '@/components/tools/ToolsPanel';
+import { AppLayout } from '@/components/shared/layout/AppLayout';
+import { InstructorDashboard } from '@/components/instructor/InstructorDashboard';
+import { StudentDashboard } from '@/components/student/StudentsDashboard';
+import { ExamInstructions } from '@/components/shared/exam/ExamInstruction';
+import { InstructorAttendancePanel } from '@/components/instructor/InstructorAttendancePanel';
+import { GradesAllCoursesPage } from '@/components/instructor/GradesAllCoursesPage';
+import { InstructorGradesPanel } from '@/components/instructor/InstructorGradesPanel';
+
+import { ExamInterface } from '@/components/shared/exam/ExamInterface';
+import type { ExamFinishPayload } from '@/components/shared/exam/ExamInterface';
+import { ScoreDisplay } from '@/components/shared/exam/ScoreDisplay';
+import { SettingsPanel } from '@/components/shared/settings/SettingsPanel';
+import { ReportsPanel } from '@/components/shared/reports/ReporstPanel';
+import { CoursesPanel } from '@/components/instructor/CoursesDetails';
+import { ModulesPanel } from '@/components/shared/modules/ModulewsPAnel';
+import { ToolsPanel } from '@/components/shared/tools/ToolsPanel';
 import { MyCoursesPanel } from '@/components/student/MycoursePanel';
 import { LearningMaterialsPanel } from '@/components/student/LearningMaterialsPanel';
 import { ActiveExamsPanel as StudentActiveExamsPanel } from '@/components/student/ActiveExamsPanel';
 import { CompletedExamsPanel } from '@/components/student/CompletedExamsPanel';
-import { LogsPanel } from '@/components/logs/LogsPanel';
-import { CreateAssessmentPanel } from '../components/assessment/CreateAssesmentsPanel';
-import { ActiveExamsPanel } from '@/components/assessment/ActiveExamsPanel';
-import { CalendarPanel } from "@/components/dashboard/CalendarPanel";
+import { StudentAttendancePanel } from '@/components/student/StudentAttendancePanel';
+import { StudentGradesPanel } from '@/components/student/StudentGradesPanel';
+import { LogsPanel } from '@/components/shared/logs/LogsPanel';
+import { CreateAssessmentPanel } from '@/components/instructor/CreateAssesmentsPanel';
+import { ActiveExamsPanel } from '@/components/instructor/ActiveExamsPanel';
+import { CalendarPanel } from "@/components/instructor/CalendarPanel";
 import { signOut } from "firebase/auth";
 import { addDoc, collection, serverTimestamp, doc, getDoc } from "firebase/firestore";
 import { auth, db } from "@/firebase";
@@ -218,6 +224,7 @@ const handleLogout = async () => {
         answers={examAnswers}
         sessionQuestions={lastFinishPayload?.sessionQuestions}
         assessment={courseExamLaunch?.assessment}
+        violations={lastFinishPayload?.violations}
         onReturnToDashboard={() => {
           setExamState('none');
           setExamAnswers({});
@@ -249,6 +256,10 @@ const handleLogout = async () => {
     <ActiveExamsPanel />
   )}
 
+  {activeTab === 'attendance' && user?.role === 'professor' && <InstructorAttendancePanel />}
+  {activeTab === 'attendance' && user?.role === 'student' && <StudentAttendancePanel />}
+  {activeTab === 'grades' && user?.role === 'professor' && <InstructorGradesPanel />}
+  {activeTab === 'grades' && user?.role === 'student' && <StudentGradesPanel />}
   {activeTab === 'reports' && <ReportsPanel />}
   {activeTab === 'calendar' && user?.role === 'student' && <CalendarPanel />}
   {activeTab === 'tools' && <ToolsPanel />}
@@ -293,9 +304,9 @@ const handleLogout = async () => {
 
   {/* Shared Routes */}
   {activeTab === 'settings' && <SettingsPanel />}
-{activeTab === 'logs' && (
-  <LogsPanel />
-)}
+  {activeTab === 'logs' && (
+    <LogsPanel />
+  )}
 </AppLayout>
   );
 };

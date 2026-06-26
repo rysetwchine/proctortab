@@ -26,3 +26,5 @@ Thumbs.db
 
 # Broken / backup node_modules
 node_modules_broken_*/
+
+.vercel

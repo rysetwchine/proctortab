@@ -450,7 +450,7 @@ export function generateFallbackQuestions(
       /\bHigh-quality excerpts\b/i.test(stripped) ||
       /\[E\d+\s*\|\s*score=/i.test(stripped);
 
-    // If we have STRUCTURED knowledge context, generate school-like questions from it
+  // If we have STRUCTURED knowledge context, generate school-like questions from it
     // instead of sentence heuristics.
     if (isStructuredKnowledge) {
       const knowledgeQuestions = generateFromStructuredKnowledgeContext(
@@ -461,10 +461,30 @@ export function generateFallbackQuestions(
         stripped
       );
       if (knowledgeQuestions.length > 0) {
-        console.log(`[Fallback] ✓ Generated ${knowledgeQuestions.length} questions from structured knowledge context`);
-        return knowledgeQuestions.slice(0, count);
+        // Avoid getting repeated template-style questions like "CHAPTER 1/2".
+        // If our structured parsing produced too few distinct concepts, we fall back to
+        // statement-based generation so questions stay grounded in excerpts.
+        const uniqueStems = new Set(
+          knowledgeQuestions
+            .map((q) => (q.question || '').toString().trim().toLowerCase())
+            .filter(Boolean)
+        );
+
+        if (uniqueStems.size >= Math.min(count, 3)) {
+          console.log(`[Fallback] ✓ Generated ${knowledgeQuestions.length} questions from structured knowledge context`);
+          return knowledgeQuestions.slice(0, count);
+        }
+
+        console.warn('[Fallback] Structured knowledge produced low-variance questions; using statement-based generation instead to diversify stems');
       }
     }
+
+
+    // IMPORTANT: When moduleContent exists, we should never drop to generic topic templates.
+    // If the content isn't readable enough, still attempt statement-based generation using
+    // the extracted text (better than returning unrelated generic questions).
+    // This guarantees questions remain grounded in the PDF-extracted content.
+
 
     const quality = assessContentQuality(stripped);
     console.log(`[Fallback] Content quality score: ${quality.score.toFixed(2)} (${quality.readable ? 'readable' : 'NOT readable'})`);

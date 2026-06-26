@@ -1,9 +1,9 @@
-import { StudentDashboard } from "./components/dashboard/StudentsDashboard";
-import { InstructorDashboard } from "./components/dashboard/InstructorDashboard";
+import { StudentDashboard } from "./components/student/StudentsDashboard";
+import { InstructorDashboard } from "./components/instructor/InstructorDashboard";
 import Index from "./pages/Index";
 import NotFound from "./pages/NotFound";
 import PhoneAttendanceScanPage from "./pages/PhoneAttendanceScanPage";
-import { ScannerErrorBoundary } from "./components/attendance/ScannerErrorBoundary";
+import { ScannerErrorBoundary } from "./components/shared/ScannerErrorBoundary";
 
 
 export const routers = [

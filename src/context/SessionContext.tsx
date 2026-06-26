@@ -12,6 +12,7 @@ import {
   serverTimestamp,
   updateDoc,
   where,
+  onSnapshot,
 } from 'firebase/firestore';
 import { syncModuleToFirestore, loadModulesFromFirestore } from '@/utils/moduleStorageService';
 import {
@@ -372,6 +373,8 @@ export const SessionProvider = ({ children }: { children: ReactNode }) => {
         loadedModuleCoursesRef.current.clear();
         loadedAssessmentCoursesRef.current.clear();
         loadedCoursesFromCloudRef.current = false;
+        setSessions([]);
+        localStorage.removeItem('proctortab_sessions');
       }
     });
     return unsubscribe;
@@ -403,22 +406,17 @@ export const SessionProvider = ({ children }: { children: ReactNode }) => {
     const ownerUid = typeof stored.uid === 'string' && stored.uid.trim() ? stored.uid.trim() : undefined;
     const studentId = resolveEnrollmentStudentId(null as any);
 
-    (async () => {
-      try {
-        let q;
-        if (role === 'professor' && ownerUid) {
-          q = query(collection(db, 'courses'), where('ownerUid', '==', ownerUid));
-        } else {
-          // Default to student behavior.
-          q = query(collection(db, 'courses'), where('enrolledStudents', 'array-contains', String(studentId)));
-        }
+    let q;
+    if (role === 'professor' && ownerUid) {
+      q = query(collection(db, 'courses'), where('ownerUid', '==', ownerUid));
+    } else {
+      // Default to student behavior.
+      q = query(collection(db, 'courses'), where('enrolledStudents', 'array-contains', String(studentId)));
+    }
 
-        const snap = await getDocs(q);
-        if (snap.empty) {
-          loadedCoursesFromCloudRef.current = true;
-          return;
-        }
-
+    const unsubscribe = onSnapshot(
+      q,
+      async (snap) => {
         const cloudSessions: Session[] = snap.docs.map((d) => sessionFromCourseDoc(d.id, d.data()));
 
         setSessions((prev) => {
@@ -451,11 +449,14 @@ export const SessionProvider = ({ children }: { children: ReactNode }) => {
         }
 
         loadedCoursesFromCloudRef.current = true;
-      } catch (e) {
-        console.warn('[SessionContext] Failed to load courses from Firestore:', e);
+      },
+      (e) => {
+        console.warn('[SessionContext] Firestore load listener failed:', e);
         loadedCoursesFromCloudRef.current = true;
       }
-    })();
+    );
+
+    return () => unsubscribe();
   }, [currentUser]);
 
   // Load Firestore modules/assessments ONCE per course when the user is logged in.
@@ -589,6 +590,18 @@ export const SessionProvider = ({ children }: { children: ReactNode }) => {
     }
 
     let resolved: Session | null = target;
+
+    // Persist to Firestore if logged in
+    if (auth.currentUser) {
+      try {
+        await updateDoc(doc(db, 'courses', target.id), {
+          enrolledStudents: arrayUnion(sid),
+          updatedAt: serverTimestamp(),
+        });
+      } catch (e) {
+        console.warn('[SessionContext] Failed to sync local target enrollment to Firestore:', e);
+      }
+    }
 
     setSessions((prev) => {
       const idx = prev.findIndex((s) => s.joinCode.replace(/[-\s]/g, '').toUpperCase() === cleanCode);

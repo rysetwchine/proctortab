@@ -1,11 +1,14 @@
 import {
-  addDoc,
   collection,
   onSnapshot,
   orderBy,
   query,
   serverTimestamp,
   type Unsubscribe,
+  setDoc,
+  updateDoc,
+  deleteDoc,
+  doc,
 } from 'firebase/firestore';
 import { db } from '@/firebase';
 import type { AttendanceLog, AttendanceQrPayload, AttendanceStatus } from '@/types/attendance';
@@ -57,6 +60,7 @@ export function subscribeAttendanceLogs(
           name: String(data.name ?? ''),
           email: String(data.email ?? ''),
           course: String(data.course ?? ''),
+          program: String(data.program ?? ''),
           year: String(data.year ?? ''),
           date: String(data.date ?? ''),
           time: String(data.time ?? ''),
@@ -118,11 +122,15 @@ export async function recordAttendance(
   courseId: string,
   payload: AttendanceQrPayload,
   scannedByProfessor: string,
-  courseName?: string
+  courseName?: string,
+  status: AttendanceStatus = 'present',
+  remarks: string = ''
 ): Promise<void> {
   const now = new Date();
   const date = getTodayDateString(now);
   const time = formatAttendanceTime(now);
+
+  const logId = `log-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
 
   const row = {
     studentId: payload.uid,
@@ -132,17 +140,77 @@ export async function recordAttendance(
     course: payload.course,
     courseName: courseName || payload.course,
     courseId,
+    program: payload.program || '',
     year: payload.year,
     date,
     time,
     timestamp: serverTimestamp(),
     scannedByProfessor,
-    status: 'present' satisfies AttendanceStatus,
+    status,
+    remarks,
   };
 
   // 1) Course-scoped logs (used by professor course attendance tab)
-  await addDoc(attendanceCollectionRef(courseId), row);
+  await setDoc(doc(db, 'courses', courseId, 'attendance_logs', logId), row);
 
   // 2) Global logs (used by student calendar attendance tab; persists across refresh/logout)
-  await addDoc(globalAttendanceCollectionRef(), row);
+  await setDoc(doc(db, 'attendance_logs', logId), row);
+}
+
+export function subscribeGlobalAttendanceLogs(
+  onData: (logs: AttendanceLog[]) => void,
+  onError?: (error: Error) => void
+): Unsubscribe {
+  const q = query(globalAttendanceCollectionRef(), orderBy('timestamp', 'desc'));
+  return onSnapshot(
+    q,
+    (snapshot) => {
+      const logs: AttendanceLog[] = snapshot.docs.map((docSnap) => {
+        const data = docSnap.data();
+        return {
+          id: docSnap.id,
+          studentId: String(data.studentId ?? ''),
+          studentNumber: String(data.studentNumber ?? ''),
+          name: String(data.name ?? ''),
+          email: String(data.email ?? ''),
+          course: String(data.course ?? ''),
+          courseName: String(data.courseName ?? data.course ?? ''),
+          courseId: String(data.courseId ?? ''),
+          program: String(data.program ?? ''),
+          year: String(data.year ?? ''),
+          date: String(data.date ?? ''),
+          time: String(data.time ?? ''),
+          timestamp: data.timestamp,
+          scannedByProfessor: String(data.scannedByProfessor ?? ''),
+          status: (data.status as AttendanceStatus) || 'present',
+          remarks: String(data.remarks ?? ''),
+        };
+      });
+      onData(logs);
+    },
+    (err) => onError?.(err as Error)
+  );
+}
+
+export async function updateAttendanceRecord(
+  courseId: string,
+  logId: string,
+  patch: Partial<AttendanceLog>
+): Promise<void> {
+  const courseLogRef = doc(db, 'courses', courseId, 'attendance_logs', logId);
+  await updateDoc(courseLogRef, patch);
+
+  const globalLogRef = doc(db, 'attendance_logs', logId);
+  await updateDoc(globalLogRef, patch);
+}
+
+export async function deleteAttendanceRecord(
+  courseId: string,
+  logId: string
+): Promise<void> {
+  const courseLogRef = doc(db, 'courses', courseId, 'attendance_logs', logId);
+  await deleteDoc(courseLogRef);
+
+  const globalLogRef = doc(db, 'attendance_logs', logId);
+  await deleteDoc(globalLogRef);
 }

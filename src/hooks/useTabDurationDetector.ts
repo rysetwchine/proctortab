@@ -14,7 +14,7 @@ interface Props {
 
 /**
  * Enhanced tab detector that tracks the duration of tab/window blur events
- * using the Page Visibility API and window blur/focus events.
+ * using the Page Visibility API.
  * 
  * Rules:
  * - ≤1 second: Warning
@@ -95,7 +95,7 @@ export const useTabDurationDetector = ({
       }
     };
 
-    // Using Page Visibility API as primary detector (more reliable)
+    // Using Page Visibility API as primary detector (highly reliable and immune to dialog blurs)
     const onVisibilityChange = () => {
       if (document.hidden) {
         handleTabLeave();
@@ -105,14 +105,9 @@ export const useTabDurationDetector = ({
     };
 
     document.addEventListener('visibilitychange', onVisibilityChange);
-    // Fallback: some browsers/flows (e.g., Alt-Tab) may not always toggle `document.hidden` reliably.
-    window.addEventListener('blur', handleTabLeave);
-    window.addEventListener('focus', handleTabReturn);
 
     return () => {
       document.removeEventListener('visibilitychange', onVisibilityChange);
-      window.removeEventListener('blur', handleTabLeave);
-      window.removeEventListener('focus', handleTabReturn);
     };
   }, [enabled, sharedLastViolationTimeRef]);
 };

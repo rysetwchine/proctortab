@@ -1,0 +1,7 @@
+# Ignore node modules and build outputs for Vercel
+node_modules
+dist
+.git
+.vercel
+.next
+out

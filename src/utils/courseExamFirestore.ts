@@ -100,6 +100,37 @@ export async function loadCourseAssessmentsFromFirestore(
       // Ensure stable order by numeric id if possible
       .sort((a: any, b: any) => Number(a.id) - Number(b.id));
 
+    // Load student results (scores) from:
+    // courses/{courseId}/exams/{examId}/results/{studentId}
+    // Grades UI expects these to live inside assessment.submissions.
+    const resultsSnap = await getDocs(
+      collection(db, 'courses', String(courseId), 'exams', examId, 'results')
+    );
+
+    const submissions = resultsSnap.docs
+      .map((rd) => {
+        const r: any = rd.data();
+        const score = r?.score;
+        const maxScore = data.maxScore ?? 100;
+
+        return {
+          studentId: String(r?.studentId ?? rd.id),
+          studentName: String(r?.studentName ?? ''),
+          score:
+            typeof score === 'number'
+              ? score
+              : score == null
+                ? null
+                : Number(score),
+          maxScore,
+          submittedAt: r?.timestamp?.toDate
+            ? r.timestamp.toDate().toISOString()
+            : r?.submittedAt,
+        };
+      })
+      // remove invalid entries
+      .filter((s) => !!s.studentId);
+
     results.push({
       id: examId,
       title: data.title || 'Untitled',
@@ -122,7 +153,8 @@ export async function loadCourseAssessmentsFromFirestore(
       generatedTopic: data.generatedTopic ?? undefined,
       generatedDifficulty: data.generatedDifficulty ?? undefined,
       questionItems: questionItems.length ? questionItems : undefined,
-      submissions: data.submissions ?? [],
+      // Prefer results subcollection over legacy embedded submissions.
+      submissions: submissions.length ? submissions : data.submissions ?? [],
     });
   }
 

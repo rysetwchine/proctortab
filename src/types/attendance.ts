@@ -1,4 +1,4 @@
-export type AttendanceStatus = 'present';
+export type AttendanceStatus = 'present' | 'late' | 'absent';
 
 export interface AttendanceQrPayload {
   uid: string;
@@ -6,7 +6,10 @@ export interface AttendanceQrPayload {
   studentNumber: string;
   email: string;
   course: string;
+  program: string;
   year: string;
+  systemIdentifier: string;
+  securityToken: string;
   generatedAt: string;
 }
 
@@ -19,12 +22,14 @@ export interface AttendanceLog {
   course: string;
   courseName?: string;
   courseId?: string;
+  program?: string;
   year: string;
   date: string;
   time: string;
   timestamp: unknown;
   scannedByProfessor: string;
   status: AttendanceStatus;
+  remarks?: string;
 }
 
 export interface StudentProfileQrFields {
@@ -32,6 +37,7 @@ export interface StudentProfileQrFields {
   studentNumber: string;
   email: string;
   course: string;
+  program?: string;
   year: string;
 }
 

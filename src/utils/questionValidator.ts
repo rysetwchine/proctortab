@@ -249,8 +249,13 @@ export function cleanMultipleChoiceOptions(question: Question): Question {
   };
 
   // Update correct answer if needed
-  let correctAnswer = question.correctAnswer.toString().trim();
-  const correctInOptions = cleanedOptions.some((opt) => opt.toLowerCase() === correctAnswer.toLowerCase());
+  // Guard: some fallback MCQs may have missing/undefined correctAnswer.
+  let correctAnswer = (question.correctAnswer ?? '').toString().trim();
+  const correctInOptions =
+    correctAnswer.length > 0
+      ? cleanedOptions.some((opt) => opt.toLowerCase() === correctAnswer.toLowerCase())
+      : false;
+
 
   if (!correctInOptions && cleanedOptions.length > 0) {
     console.warn('Correct answer not found in cleaned options, using first option');

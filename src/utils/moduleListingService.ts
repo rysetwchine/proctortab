@@ -6,13 +6,6 @@
 import type { CourseModule, ModuleItem } from '@/context/SessionContext';
 import { assessContentQuality } from './contentQuality';
 
-/**
- * "Has content" for UI selection should be LENIENT:
- * - If we extracted enough characters, we should allow selection.
- * - Quality issues should be shown as a WARNING, not treated as "Empty".
- *
- * Reason: many PDFs extract messy-but-usable text (still enough to generate good questions after cleaning).
- */
 function hasEnoughContent(text?: string, minChars: number = 50): boolean {
   const t = (text || '').trim();
   return t.length >= minChars;
@@ -24,45 +17,34 @@ function isReadableContent(text?: string, minChars: number = 150): boolean {
   return assessContentQuality(t).readable;
 }
 
-/**
- * Represents a selectable file from a module
- */
 export interface SelectableModuleFile {
   id: string;
-  fileId: string; // unique identifier for the file within the module
+  fileId: string;
   fileName: string;
   displayName: string;
   fileType: 'pdf' | 'docx' | 'txt' | 'pptx' | 'video' | 'file';
   moduleId: string;
   moduleTitle: string;
   fileSize?: number;
-  hasContent: boolean; // whether file content was successfully extracted
-  contentPreview?: string; // first 100 chars of content
+  hasContent: boolean;
+  contentPreview?: string;
 }
 
-/**
- * Get all selectable files from modules
- * Returns individual files, not grouped by module
- * Falls back to subcollection if module.items is empty
- */
 export function getAllSelectableModuleFiles(modules: CourseModule[]): SelectableModuleFile[] {
   const files: SelectableModuleFile[] = [];
 
   for (const module of modules) {
-    // Include modules with items OR modules with _hasExtractedContent flag (from Firestore)
     const items = module.items || [];
-    const hasContentFlag = (module as any)._hasExtractedContent === true || 
+    const hasContentFlag = (module as any)._hasExtractedContent === true ||
                            ((module as any)._contentLength && (module as any)._contentLength > 50);
-    
-    // Skip only if there are truly no items AND no content metadata
+
     if (items.length === 0 && !hasContentFlag) {
       continue;
     }
 
-    // Process all items that exist
     for (const item of items) {
       const hasContent = hasEnoughContent(item.fileContent, 50);
-      
+
       files.push({
         id: `${module.id}-${item.id}`,
         fileId: item.id,
@@ -73,7 +55,7 @@ export function getAllSelectableModuleFiles(modules: CourseModule[]): Selectable
         moduleTitle: module.displayName || module.title,
         fileSize: item.fileSize,
         hasContent,
-        contentPreview: hasContent 
+        contentPreview: hasContent
           ? item.fileContent!.substring(0, 100).replace(/\n/g, ' ') + '...'
           : undefined,
       });
@@ -83,9 +65,6 @@ export function getAllSelectableModuleFiles(modules: CourseModule[]): Selectable
   return files;
 }
 
-/**
- * Get files from a specific module
- */
 export function getModuleFiles(
   modules: CourseModule[],
   moduleId: string
@@ -95,7 +74,7 @@ export function getModuleFiles(
 
   return (module.items || []).map((item, index) => {
     const hasContent = hasEnoughContent(item.fileContent, 50);
-    
+
     return {
       id: `${moduleId}-${item.id}`,
       fileId: item.id,
@@ -113,18 +92,12 @@ export function getModuleFiles(
   });
 }
 
-/**
- * Get module items that have actual content extracted
- */
 export function getModuleItemsWithContent(module: CourseModule): ModuleItem[] {
   return (module.items || []).filter(
     (item) => hasEnoughContent(item.fileContent, 50)
   );
 }
 
-/**
- * Get combined content from multiple files
- */
 export function getCombinedModuleContent(
   modules: CourseModule[],
   fileIds: string[]
@@ -142,9 +115,6 @@ export function getCombinedModuleContent(
   return contents.filter(Boolean).join('\n\n---\n\n');
 }
 
-/**
- * Get content from a specific file
- */
 export function getFileContent(
   modules: CourseModule[],
   fileId: string
@@ -159,15 +129,11 @@ export function getFileContent(
   return '';
 }
 
-/**
- * Check if files have valid content for question generation
- * Validates that extracted content is sufficient for AI-based question generation
- */
 export function validateFilesHaveContent(
   modules: CourseModule[],
   fileIds: string[]
 ): { valid: boolean; emptyCount: number; totalCount: number; details: string[] } {
-  const minContentLength = 150; // Require at least 150 chars
+  const minContentLength = 150;
   let validCount = 0;
   const totalCount = fileIds.length;
   const details: string[] = [];
@@ -179,36 +145,28 @@ export function validateFilesHaveContent(
         const contentLength = item.fileContent?.trim().length || 0;
         const readable = isReadableContent(item.fileContent, minContentLength);
         const hasEnoughLength = contentLength > minContentLength;
-        
+
         if (hasEnoughLength) {
-          // Allow generation as long as we have enough extracted characters.
-          // If quality is low, we still allow but surface a warning instead of blocking the user.
           validCount++;
           details.push(
             readable
               ? `✓ ${item.fileName}: ${contentLength} chars (sufficient)`
               : `⚠ ${item.fileName}: ${contentLength} chars (low-quality extraction; OCR/searchable PDF recommended)`
           );
-          console.log(
-            `[Validation] ✓ File ${item.fileName} has sufficient content: ${contentLength} chars`
-          );
+          console.log(`[Validation] ✓ File ${item.fileName} has sufficient content: ${contentLength} chars`);
         } else {
           details.push(
             !hasEnoughLength
               ? `✗ ${item.fileName}: ${contentLength}/${minContentLength} chars (insufficient)`
               : `⚠ ${item.fileName}: extracted text is low-quality (may need OCR / re-export as searchable PDF)`
           );
-          console.warn(
-            `[Validation] ✗ File ${item.fileName} failed content validation (len=${contentLength}, readable=${readable})`
-          );
+          console.warn(`[Validation] ✗ File ${item.fileName} failed content validation (len=${contentLength}, readable=${readable})`);
         }
       }
     }
   }
 
-  console.log(
-    `[Validation] Result: ${validCount}/${totalCount} files have sufficient content`
-  );
+  console.log(`[Validation] Result: ${validCount}/${totalCount} files have sufficient content`);
   details.forEach((d) => console.log(`[Validation] ${d}`));
 
   return {
@@ -219,9 +177,6 @@ export function validateFilesHaveContent(
   };
 }
 
-/**
- * Format file size for display (e.g., "1.5 MB")
- */
 export function formatFileSize(bytes?: number): string {
   if (!bytes) return 'Unknown';
   if (bytes < 1024) return `${bytes} B`;
@@ -229,9 +184,6 @@ export function formatFileSize(bytes?: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-/**
- * Get icon for file type
- */
 export function getFileTypeIcon(
   fileType: 'pdf' | 'docx' | 'txt' | 'pptx' | 'video' | 'file'
 ): string {

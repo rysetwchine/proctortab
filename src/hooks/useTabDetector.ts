@@ -36,17 +36,13 @@ export const useTabDetector = ({ enabled, onTabSwitch, sharedLastViolationTimeRe
       }
     };
 
-    const onBlur = () => handleEvent();
-
     const onVisibility = () => {
       if (document.hidden) handleEvent();
     };
 
-    window.addEventListener("blur", onBlur);
     document.addEventListener("visibilitychange", onVisibility);
 
     return () => {
-      window.removeEventListener("blur", onBlur);
       document.removeEventListener("visibilitychange", onVisibility);
     };
   }, [enabled, sharedLastViolationTimeRef]);
