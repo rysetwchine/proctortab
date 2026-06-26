@@ -1,9 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { Html5Qrcode } from 'html5-qrcode';
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { toast } from 'sonner';
 import {
-  Users, CheckCircle2, Clock, XCircle, Search, Filter, Camera, Square, Edit, Trash2, Download, FileText,
-  TrendingUp, BarChart3, ArrowUpDown, ChevronLeft, ChevronRight, AlertCircle, RefreshCw
+  Users, CheckCircle2, Clock, XCircle, Search, Camera, Square, Edit, Trash2, Download, FileText,
+  TrendingUp, BarChart3, ArrowUpDown, ChevronLeft, ChevronRight, AlertCircle, RefreshCw, Wifi
 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -12,6 +11,7 @@ import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useSession } from '@/hooks/useSession';
 import { useAuth } from '@/hooks/useAuth';
+import { useWebcamQrScanner } from '@/hooks/useWebcamQrScanner';
 import {
   getTodayDateString,
   subscribeGlobalAttendanceLogs,
@@ -20,14 +20,12 @@ import {
   deleteAttendanceRecord
 } from '@/utils/attendanceFirestore';
 import { parseAttendanceQr } from '@/utils/attendanceQr';
-import { formatCameraError, waitForScannerMount } from '@/utils/attendanceCamera';
 import type { AttendanceLog, AttendanceStatus } from '@/types/attendance';
 import { MotionBackground } from '@/components/shared/MotionBackground';
 
 type ActiveSubTabType = 'dashboard' | 'scanner' | 'records' | 'reports';
 type ReportType = 'daily' | 'weekly' | 'monthly' | 'course';
 
-const SCANNER_ELEMENT_ID = 'instructor-webcam-qr-scanner';
 const SCAN_COOLDOWN_MS = 3000;
 
 export function InstructorAttendancePanel() {
@@ -49,11 +47,10 @@ export function InstructorAttendancePanel() {
   const [selectedCourseScanner, setSelectedCourseScanner] = useState('');
   const [scannerStatusMode, setScannerStatusMode] = useState<AttendanceStatus>('present');
   const [scannerRemarks, setScannerRemarks] = useState('');
-  const [cameras, setCameras] = useState<any[]>([]);
   const [selectedCameraId, setSelectedCameraId] = useState('');
-  const [scannerPhase, setScannerPhase] = useState<'idle' | 'loading' | 'scanning' | 'saving' | 'error'>('idle');
-  const [cameraError, setCameraError] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
   const [lastScanResult, setLastScanResult] = useState<{ status: 'success' | 'error'; message: string } | null>(null);
+  const lastScanRef = useRef<{ text: string; at: number }>({ text: '', at: 0 });
 
   // Edit Modal states
   const [editLog, setEditLog] = useState<AttendanceLog | null>(null);
@@ -66,9 +63,6 @@ export function InstructorAttendancePanel() {
 
   const itemsPerPage = 10;
   const today = getTodayDateString();
-
-  const scannerRef = useRef<Html5Qrcode | null>(null);
-  const lastScanRef = useRef<{ text: string; at: number }>({ text: '', at: 0 });
 
   // Get only courses owned by the professor
   const professorCourses = useMemo(() => {
@@ -139,65 +133,34 @@ export function InstructorAttendancePanel() {
     };
   }, [professorLogs, todayLogs, totalEnrolledStudents]);
 
-  // Handle camera retrieval
-  useEffect(() => {
-    if (activeSubTab !== 'scanner') {
-      void stopCamera();
-      return;
-    }
-
-    Html5Qrcode.getCameras()
-      .then((devices) => {
-        setCameras(devices);
-        if (devices.length > 0 && !selectedCameraId) {
-          setSelectedCameraId(devices[0].id);
-        }
-      })
-      .catch((err) => {
-        console.warn('Failed to retrieve web cameras:', err);
-        setCameraError('Webcam devices not found or permission blocked.');
-      });
-  }, [activeSubTab]);
-
-  const stopCamera = async () => {
-    const instance = scannerRef.current;
-    scannerRef.current = null;
-    if (!instance) return;
-    try {
-      if (instance.isScanning) await instance.stop();
-      await instance.clear();
-    } catch {
-      /* ignore */
-    }
-  };
-
-  const handleDecodedQr = async (decodedText: string) => {
+  // ─── QR Decode handler (called by the scanner hook) ───────────────────────
+  const handleDecodedQr = useCallback(async (decodedText: string) => {
     const trimmed = decodedText.trim();
     if (!trimmed) return;
 
     const now = Date.now();
     if (lastScanRef.current.text === trimmed && now - lastScanRef.current.at < SCAN_COOLDOWN_MS) {
-      return; // Cooldown active
+      return; // Cooldown active — same code within 3 seconds
     }
     lastScanRef.current = { text: trimmed, at: now };
 
-    setScannerPhase('saving');
+    setIsSaving(true);
 
     const payload = parseAttendanceQr(trimmed);
     if (!payload) {
       setLastScanResult({ status: 'error', message: 'Malformed QR payload.' });
       toast.error('Malformed student QR code.');
-      setScannerPhase('scanning');
+      setIsSaving(false);
       return;
     }
 
-    // Validation: Has the QR code expired (screenshot protection)?
+    // QR expiration check (screenshot protection)
     const qrAgeMs = Date.now() - new Date(payload.generatedAt).getTime();
-    const QR_EXPIRATION_LIMIT_MS = 5 * 60 * 1000; // 5 minutes expiration
+    const QR_EXPIRATION_LIMIT_MS = 5 * 60 * 1000;
     if (qrAgeMs > QR_EXPIRATION_LIMIT_MS) {
       setLastScanResult({ status: 'error', message: 'QR Code Expired. Please ask student to show a live QR code.' });
       toast.error('Scan failed: QR Code has expired.');
-      setScannerPhase('scanning');
+      setIsSaving(false);
       return;
     }
 
@@ -205,31 +168,31 @@ export function InstructorAttendancePanel() {
     if (!course) {
       setLastScanResult({ status: 'error', message: 'No course selected.' });
       toast.error('Invalid course selection.');
-      setScannerPhase('scanning');
+      setIsSaving(false);
       return;
     }
 
-    // Validation: Is student enrolled?
+    // Enrollment check
     const roster = (course.enrolledStudents || []).map(String);
     if (roster.length > 0 && !roster.includes(String(payload.uid))) {
       setLastScanResult({ status: 'error', message: `${payload.name} is not enrolled in this course.` });
       toast.error(`${payload.name} is not enrolled in ${course.title}.`);
-      setScannerPhase('scanning');
+      setIsSaving(false);
       return;
     }
 
-    // Validation: Already scanned today?
+    // Already scanned today?
     const hasAlreadyScanned = professorLogs.some(
       (log) => String(log.studentId) === String(payload.uid) && log.courseId === course.id && log.date === today
     );
     if (hasAlreadyScanned) {
       setLastScanResult({ status: 'error', message: `${payload.name} already checked in today.` });
       toast.error(`${payload.name} has already checked in today for ${course.title}.`);
-      setScannerPhase('scanning');
+      setIsSaving(false);
       return;
     }
 
-    // Record Attendance
+    // Record attendance
     try {
       const professorName = authUser?.name || 'Professor';
       await recordAttendance(String(course.id), payload, professorName, course.title, scannerStatusMode, scannerRemarks);
@@ -240,77 +203,37 @@ export function InstructorAttendancePanel() {
       setLastScanResult({ status: 'error', message: 'Failed to write attendance log.' });
       toast.error('Database connection error.');
     } finally {
-      setScannerPhase('scanning');
+      setIsSaving(false);
     }
-  };
+  }, [professorCourses, professorLogs, selectedCourseScanner, scannerStatusMode, scannerRemarks, authUser, today]);
 
-  const startCamera = async () => {
-    if (!selectedCameraId) {
-      toast.error('No webcam selected.');
-      return;
-    }
+  // ─── Native webcam QR scanner hook ────────────────────────────────────────
+  const {
+    videoRef,
+    status: camStatus,
+    errorMessage: camError,
+    cameras,
+    start: startCamera,
+    stop: stopCamera,
+  } = useWebcamQrScanner({
+    onDecode: handleDecodedQr,
+    fps: 10,
+    deviceId: selectedCameraId || undefined,
+  });
 
-    setCameraError(null);
-    setScannerPhase('loading');
-    setLastScanResult(null);
-
-    try {
-      // Step 1: Pre-flight — confirm browser can open the camera stream before html5qrcode tries
-      const preStream = await navigator.mediaDevices.getUserMedia({ video: { deviceId: { exact: selectedCameraId } }, audio: false });
-      preStream.getTracks().forEach((t) => t.stop()); // release immediately
-
-      // Step 2: Stop any existing scanner instance
-      await stopCamera();
-
-      // Step 3: Give React a tick to flush the 'loading' state so the scanner div becomes visible in DOM
-      await new Promise<void>((resolve) => setTimeout(resolve, 80));
-
-      // Step 4: Wait for the DOM element to be painted with real pixel dimensions
-      const el = await waitForScannerMount(SCANNER_ELEMENT_ID, 60);
-      const containerW = el.offsetWidth;
-      const containerH = el.offsetHeight;
-      const boxSize = Math.min(Math.floor(Math.min(containerW, containerH) * 0.75), 300);
-
-      // Step 5: Create scanner and start
-      const scanner = new Html5Qrcode(SCANNER_ELEMENT_ID, { verbose: false });
-      scannerRef.current = scanner;
-
-      await scanner.start(
-        selectedCameraId,
-        {
-          fps: 10,
-          qrbox: { width: boxSize, height: boxSize },
-          aspectRatio: containerW / containerH,
-          videoConstraints: {
-            deviceId: { exact: selectedCameraId },
-            width: { ideal: containerW },
-            height: { ideal: containerH },
-          },
-        },
-        (text) => void handleDecodedQr(text),
-        () => { /* silent scan failure */ }
-      );
-      setScannerPhase('scanning');
-    } catch (err: any) {
-      console.error('Failed to start webcam scanner:', err);
-      setCameraError(formatCameraError(err));
-      setScannerPhase('error');
-      await stopCamera();
-    }
-  };
-
-  const handleStopScanner = async () => {
-    await stopCamera();
-    setScannerPhase('idle');
-    setLastScanResult(null);
-  };
-
-  // Clean up scanner on unmount
+  // When user switches away from scanner tab, stop camera
   useEffect(() => {
-    return () => {
-      void stopCamera();
-    };
-  }, []);
+    if (activeSubTab !== 'scanner') {
+      stopCamera();
+    }
+  }, [activeSubTab, stopCamera]);
+
+  // When cameras list updates, pick default if none selected
+  useEffect(() => {
+    if (cameras.length > 0 && !selectedCameraId) {
+      setSelectedCameraId(cameras[0].deviceId);
+    }
+  }, [cameras, selectedCameraId]);
 
   // Records Table sorting & pagination
   const filteredLogs = useMemo(() => {
@@ -359,7 +282,7 @@ export function InstructorAttendancePanel() {
     }
   };
 
-  // Edit / Delete action handlers
+  // Edit / Delete
   const handleOpenEdit = (log: AttendanceLog) => {
     setEditLog(log);
     setEditStatus(log.status);
@@ -390,13 +313,9 @@ export function InstructorAttendancePanel() {
     }
   };
 
-  // CSV Excel Export
+  // CSV Export
   const handleExportCsv = () => {
-    if (filteredLogs.length === 0) {
-      toast.error('No records available to export.');
-      return;
-    }
-
+    if (filteredLogs.length === 0) { toast.error('No records available to export.'); return; }
     const headers = ['Student ID', 'Student Name', 'Course', 'Program', 'Year Level', 'Date', 'Time In', 'Status', 'Remarks'];
     const rows = filteredLogs.map((log) => [
       log.studentNumber || log.studentId || '',
@@ -409,14 +328,10 @@ export function InstructorAttendancePanel() {
       log.status || '',
       log.remarks || '',
     ]);
-
-    const csvContent =
-      'data:text/csv;charset=utf-8,' +
+    const csvContent = 'data:text/csv;charset=utf-8,' +
       [headers.join(','), ...rows.map((r) => r.map((val) => `"${val.replace(/"/g, '""')}"`).join(','))].join('\n');
-
-    const encodedUri = encodeURI(csvContent);
     const link = document.createElement('a');
-    link.setAttribute('href', encodedUri);
+    link.setAttribute('href', encodeURI(csvContent));
     link.setAttribute('download', `proctortab-attendance-audit-${today}.csv`);
     document.body.appendChild(link);
     link.click();
@@ -426,16 +341,9 @@ export function InstructorAttendancePanel() {
 
   // PDF Export
   const handleExportPdf = () => {
-    if (filteredLogs.length === 0) {
-      toast.error('No records available to export.');
-      return;
-    }
-
+    if (filteredLogs.length === 0) { toast.error('No records available to export.'); return; }
     const printWindow = window.open('', '_blank');
-    if (!printWindow) {
-      toast.error('Pop-up blocked. Please allow pop-ups to print PDF.');
-      return;
-    }
+    if (!printWindow) { toast.error('Pop-up blocked. Please allow pop-ups to print PDF.'); return; }
     printWindow.document.open();
     printWindow.document.write(`
       <html>
@@ -461,21 +369,12 @@ export function InstructorAttendancePanel() {
           <table>
             <thead>
               <tr>
-                <th>Student ID</th>
-                <th>Student Name</th>
-                <th>Course</th>
-                <th>Program</th>
-                <th>Year Level</th>
-                <th>Date</th>
-                <th>Time In</th>
-                <th>Status</th>
-                <th>Remarks</th>
+                <th>Student ID</th><th>Student Name</th><th>Course</th><th>Program</th>
+                <th>Year Level</th><th>Date</th><th>Time In</th><th>Status</th><th>Remarks</th>
               </tr>
             </thead>
             <tbody>
-              ${filteredLogs
-                .map(
-                  (log) => `
+              ${filteredLogs.map((log) => `
                 <tr>
                   <td>${log.studentNumber || log.studentId}</td>
                   <td>${log.name}</td>
@@ -487,9 +386,7 @@ export function InstructorAttendancePanel() {
                   <td><span class="badge badge-${log.status}">${log.status}</span></td>
                   <td>${log.remarks || '—'}</td>
                 </tr>
-              `
-                )
-                .join('')}
+              `).join('')}
             </tbody>
           </table>
         </body>
@@ -498,81 +395,56 @@ export function InstructorAttendancePanel() {
     printWindow.document.close();
   };
 
-  // Reports Computations
+  // Reports
   const reportMetrics = useMemo(() => {
     let list = [...professorLogs];
-    if (reportCourseId !== 'all') {
-      list = list.filter((l) => String(l.courseId) === String(reportCourseId));
-    }
-
+    if (reportCourseId !== 'all') list = list.filter((l) => String(l.courseId) === String(reportCourseId));
     if (reportType === 'daily') {
       list = list.filter((l) => l.date === today);
     } else if (reportType === 'weekly') {
-      const oneWeekAgo = new Date();
-      oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
+      const oneWeekAgo = new Date(); oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
       list = list.filter((l) => new Date(l.date) >= oneWeekAgo);
     } else if (reportType === 'monthly') {
-      const oneMonthAgo = new Date();
-      oneMonthAgo.setDate(oneMonthAgo.getDate() - 30);
+      const oneMonthAgo = new Date(); oneMonthAgo.setDate(oneMonthAgo.getDate() - 30);
       list = list.filter((l) => new Date(l.date) >= oneMonthAgo);
     }
-
     const present = list.filter((l) => l.status === 'present').length;
     const late = list.filter((l) => l.status === 'late').length;
     const absent = list.filter((l) => l.status === 'absent').length;
     const total = present + late + absent;
     const attendanceRate = total > 0 ? Math.round(((present + late) / total) * 100) : 0;
-
-    // Student frequency rankings
     const freqMap: Record<string, { name: string; number: string; present: number; total: number }> = {};
     list.forEach((l) => {
       const key = l.studentId;
-      if (!freqMap[key]) {
-        freqMap[key] = { name: l.name, number: l.studentNumber, present: 0, total: 0 };
-      }
+      if (!freqMap[key]) freqMap[key] = { name: l.name, number: l.studentNumber, present: 0, total: 0 };
       freqMap[key].total += 1;
-      if (l.status === 'present' || l.status === 'late') {
-        freqMap[key].present += 1;
-      }
+      if (l.status === 'present' || l.status === 'late') freqMap[key].present += 1;
     });
-
-    const studentRankings = Object.values(freqMap).map((item) => ({
-      ...item,
-      rate: item.total > 0 ? Math.round((item.present / item.total) * 100) : 0,
-    })).sort((a, b) => a.rate - b.rate); // Sort ascending (worst attendance first)
-
-    return {
-      totalLogs: total,
-      present,
-      late,
-      absent,
-      rate: attendanceRate,
-      rankings: studentRankings.slice(0, 5),
-    };
+    const studentRankings = Object.values(freqMap)
+      .map((item) => ({ ...item, rate: item.total > 0 ? Math.round((item.present / item.total) * 100) : 0 }))
+      .sort((a, b) => a.rate - b.rate);
+    return { totalLogs: total, present, late, absent, rate: attendanceRate, rankings: studentRankings.slice(0, 5) };
   }, [professorLogs, reportType, reportCourseId, today]);
 
   const getStatusLabelBadge = (status: AttendanceStatus) => {
     switch (status) {
-      case 'present':
-        return <Badge className="bg-green-500/10 text-green-400 border border-green-500/20 capitalize">Present</Badge>;
-      case 'late':
-        return <Badge className="bg-yellow-500/10 text-yellow-400 border border-yellow-500/20 capitalize">Late</Badge>;
-      case 'absent':
-        return <Badge className="bg-red-500/10 text-red-400 border border-red-500/20 capitalize">Absent</Badge>;
-      default:
-        return <Badge variant="outline">{status}</Badge>;
+      case 'present': return <Badge className="bg-green-500/10 text-green-400 border border-green-500/20 capitalize">Present</Badge>;
+      case 'late':    return <Badge className="bg-yellow-500/10 text-yellow-400 border border-yellow-500/20 capitalize">Late</Badge>;
+      case 'absent':  return <Badge className="bg-red-500/10 text-red-400 border border-red-500/20 capitalize">Absent</Badge>;
+      default:        return <Badge variant="outline">{status}</Badge>;
     }
   };
+
+  const isStreaming = camStatus === 'streaming';
+  const isRequesting = camStatus === 'requesting';
 
   return (
     <MotionBackground>
       <div className="mx-auto max-w-7xl px-4 py-8 space-y-6">
-        {/* Header Title */}
+        {/* Header */}
         <div className="flex flex-col gap-1">
           <h1 className="text-3xl font-extrabold text-white tracking-tight">Attendance Workspace</h1>
-          <p className="text-slate-400 text-sm">
-            Monitor attendance stats, run built-in webcam scanners, and audit records in real-time.
-          </p>
+          <p className="text-slate-400 text-sm">Monitor attendance stats, run built-in webcam scanners, and audit records in real-time.</p>
         </div>
 
         {/* Tab Selection */}
@@ -591,10 +463,9 @@ export function InstructorAttendancePanel() {
           </Button>
         </div>
 
-        {/* 1. DASHBOARD SUBTAB */}
+        {/* ── 1. DASHBOARD ─────────────────────────────────────────────────── */}
         {activeSubTab === 'dashboard' && (
           <div className="space-y-6 animate-in fade-in duration-300">
-            {/* Stat Cards */}
             <div className="space-y-4">
               <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
                 <Card className="border-slate-800/80 bg-slate-950/40 backdrop-blur-xl p-4 text-center rounded-3xl shadow-xl flex flex-col justify-center min-h-[120px]">
@@ -618,7 +489,6 @@ export function InstructorAttendancePanel() {
                   <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-widest mt-1">Attendance Today</div>
                 </Card>
               </div>
-
               <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
                 <Card className="border-slate-800/80 bg-slate-950/20 backdrop-blur-xl p-4 text-center rounded-3xl shadow-xl flex flex-col justify-center min-h-[120px]">
                   <Users className="mx-auto mb-1 h-5 w-5 text-blue-400" />
@@ -642,8 +512,6 @@ export function InstructorAttendancePanel() {
                 </Card>
               </div>
             </div>
-
-            {/* Today's Feed */}
             <Card className="border-slate-800 bg-slate-950/20 backdrop-blur-xl rounded-3xl shadow-xl">
               <CardHeader className="border-b border-slate-800/80 p-6">
                 <CardTitle className="text-lg">Today&apos;s Attendance Activity</CardTitle>
@@ -681,11 +549,13 @@ export function InstructorAttendancePanel() {
           </div>
         )}
 
-        {/* 2. WEBCAM SCANNER SUBTAB */}
+        {/* ── 2. WEBCAM SCANNER ────────────────────────────────────────────── */}
         {activeSubTab === 'scanner' && (
           <div className="grid gap-6 md:grid-cols-[1fr_360px] items-start animate-in fade-in duration-300">
-            {/* Left: Webcam Feed viewport */}
-            <Card className="border-slate-800 bg-slate-950/40 backdrop-blur-xl rounded-3xl overflow-hidden shadow-2xl flex flex-col p-6 items-center">
+            {/* Left: Native video feed */}
+            <Card className="border-slate-800 bg-slate-950/40 backdrop-blur-xl rounded-3xl overflow-hidden shadow-2xl flex flex-col p-6">
+
+              {/* Camera selector + controls */}
               <div className="w-full flex justify-between items-center gap-3 flex-wrap mb-4">
                 <div className="flex gap-2 items-center flex-1">
                   <span className="text-xs font-semibold text-slate-400 shrink-0">Webcam:</span>
@@ -694,66 +564,94 @@ export function InstructorAttendancePanel() {
                     onChange={(e) => setSelectedCameraId(e.target.value)}
                     className="bg-slate-900 border border-slate-800 rounded-xl px-3 py-1.5 text-xs text-slate-300 flex-1 focus:outline-none focus:ring-1 focus:ring-blue-500"
                   >
+                    {cameras.length === 0 && (
+                      <option value="">— press Start Camera to list devices —</option>
+                    )}
                     {cameras.map((d) => (
-                      <option key={d.id} value={d.id}>
-                        {d.label || `Camera ${d.id.slice(0, 5)}`}
+                      <option key={d.deviceId} value={d.deviceId}>
+                        {d.label || `Camera ${d.deviceId.slice(0, 6)}`}
                       </option>
                     ))}
                   </select>
                 </div>
-
                 <div className="flex gap-2">
-                  {scannerPhase === 'scanning' || scannerPhase === 'saving' ? (
-                    <Button onClick={handleStopScanner} variant="destructive" size="sm" className="rounded-xl px-4 h-8 text-xs font-bold gap-1">
+                  {isStreaming ? (
+                    <Button onClick={stopCamera} variant="destructive" size="sm" className="rounded-xl px-4 h-8 text-xs font-bold gap-1">
                       <Square className="w-3.5 h-3.5" /> Stop Scanner
                     </Button>
                   ) : (
-                    <Button onClick={startCamera} className="bg-blue-600 hover:bg-blue-700 text-white rounded-xl px-4 h-8 text-xs font-bold gap-1" disabled={scannerPhase === 'loading' || !selectedCameraId}>
-                      <Camera className="w-3.5 h-3.5" /> Start Camera
+                    <Button
+                      onClick={startCamera}
+                      disabled={isRequesting}
+                      className="bg-blue-600 hover:bg-blue-700 text-white rounded-xl px-4 h-8 text-xs font-bold gap-1"
+                    >
+                      {isRequesting ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Camera className="w-3.5 h-3.5" />}
+                      {isRequesting ? 'Requesting...' : 'Start Camera'}
                     </Button>
                   )}
                 </div>
               </div>
 
-              {cameraError && (
+              {/* Error banner */}
+              {camError && (
                 <div className="w-full bg-rose-500/10 border border-rose-500/20 rounded-2xl p-4 text-rose-400 text-xs flex items-center gap-2 mb-4">
                   <AlertCircle className="w-4 h-4 shrink-0" />
-                  <span>{cameraError}</span>
+                  <span>{camError}</span>
                 </div>
               )}
 
-              {/* Viewport Frame */}
-              <div className="relative w-full overflow-hidden rounded-3xl border border-slate-800 bg-slate-950/60 aspect-[4/3]">
-                {scannerPhase === 'idle' && (
-                  <div className="absolute inset-0 flex flex-col items-center justify-center p-6 space-y-2 text-center">
-                    <Camera className="w-12 h-12 text-slate-600 mx-auto" />
-                    <p className="text-xs text-slate-500">Camera is currently offline. Press "Start Camera" to begin scanning.</p>
-                  </div>
-                )}
-                {scannerPhase === 'loading' && (
-                  <div className="absolute inset-0 bg-slate-950/90 z-20 flex flex-col items-center justify-center gap-2 rounded-3xl">
-                    <RefreshCw className="w-8 h-8 text-blue-500 mx-auto animate-spin" />
-                    <p className="text-xs text-slate-400">Initializing webcam device feed...</p>
-                  </div>
-                )}
-                {scannerPhase === 'saving' && (
-                  <div className="absolute inset-0 bg-slate-950/85 z-20 flex flex-col items-center justify-center gap-2 rounded-3xl">
-                    <RefreshCw className="w-8 h-8 text-blue-500 animate-spin" />
-                    <p className="text-xs text-slate-400">Validating and saving check-in...</p>
+              {/* Video viewport — native <video> element, no html5-qrcode */}
+              <div className="relative w-full overflow-hidden rounded-3xl border border-slate-800 bg-slate-950/80 aspect-[4/3]">
+
+                {/* Idle state */}
+                {!isStreaming && !isRequesting && !camError && (
+                  <div className="absolute inset-0 flex flex-col items-center justify-center p-6 space-y-3 text-center">
+                    <div className="w-16 h-16 rounded-full bg-slate-800/60 flex items-center justify-center">
+                      <Camera className="w-8 h-8 text-slate-500" />
+                    </div>
+                    <p className="text-xs text-slate-500 leading-relaxed">Camera is offline.<br/>Press <span className="text-blue-400 font-semibold">Start Camera</span> to begin scanning QR codes.</p>
                   </div>
                 )}
 
-                {/* Html5Qrcode video attaches here */}
-                <div id={SCANNER_ELEMENT_ID} className={`absolute inset-0 !w-full !h-full [&_video]:!block [&_video]:!w-full [&_video]:!h-full [&_video]:object-cover [&_img]:hidden ${scannerPhase !== 'idle' ? 'block' : 'hidden'}`} />
+                {/* Loading / requesting state */}
+                {isRequesting && (
+                  <div className="absolute inset-0 bg-slate-950/90 z-20 flex flex-col items-center justify-center gap-3 rounded-3xl">
+                    <RefreshCw className="w-8 h-8 text-blue-500 animate-spin" />
+                    <p className="text-xs text-slate-400">Requesting camera permission...</p>
+                  </div>
+                )}
+
+                {/* Saving overlay */}
+                {isSaving && (
+                  <div className="absolute inset-0 bg-slate-950/70 z-30 flex flex-col items-center justify-center gap-2 rounded-3xl">
+                    <RefreshCw className="w-8 h-8 text-emerald-400 animate-spin" />
+                    <p className="text-xs text-slate-300">Validating and saving check-in...</p>
+                  </div>
+                )}
+
+                {/* Live indicator */}
+                {isStreaming && (
+                  <div className="absolute top-3 left-3 z-10 flex items-center gap-1.5 bg-black/50 backdrop-blur-sm rounded-full px-2.5 py-1">
+                    <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+                    <span className="text-[10px] font-bold text-white uppercase tracking-widest">Live</span>
+                  </div>
+                )}
+
+                {/* ✅ THE NATIVE VIDEO ELEMENT — no html5-qrcode sizing issues */}
+                <video
+                  ref={videoRef}
+                  autoPlay
+                  muted
+                  playsInline
+                  className={`absolute inset-0 w-full h-full object-cover rounded-3xl ${isStreaming ? 'block' : 'hidden'}`}
+                />
               </div>
             </Card>
 
-            {/* Right: Scan controls & validation results */}
+            {/* Right: Scan controls & results */}
             <div className="space-y-6">
-              {/* Scan Configuration */}
               <Card className="border-slate-800 bg-slate-950/20 backdrop-blur-xl rounded-3xl p-5 space-y-4">
                 <h3 className="text-sm font-bold text-slate-200">Scanner Setup</h3>
-
                 <div className="space-y-1">
                   <label className="text-[10px] text-slate-500 uppercase tracking-widest font-bold">Mark Course</label>
                   <select
@@ -766,7 +664,6 @@ export function InstructorAttendancePanel() {
                     ))}
                   </select>
                 </div>
-
                 <div className="space-y-1">
                   <label className="text-[10px] text-slate-500 uppercase tracking-widest font-bold">Standard Status</label>
                   <div className="grid grid-cols-2 gap-2 p-1 bg-slate-900 border border-slate-800 rounded-xl">
@@ -774,7 +671,6 @@ export function InstructorAttendancePanel() {
                     <button type="button" onClick={() => setScannerStatusMode('late')} className={`py-1 rounded-lg text-xs font-bold transition-all ${scannerStatusMode === 'late' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-400 hover:text-white'}`}>Late</button>
                   </div>
                 </div>
-
                 <div className="space-y-1">
                   <label className="text-[10px] text-slate-500 uppercase tracking-widest font-bold">Custom Remarks</label>
                   <Input
@@ -786,7 +682,7 @@ export function InstructorAttendancePanel() {
                 </div>
               </Card>
 
-              {/* Scan audit result logs */}
+              {/* Scan result */}
               {lastScanResult && (
                 <Card className={`border-0 p-5 rounded-3xl shadow-xl ${lastScanResult.status === 'success' ? 'bg-emerald-950/20 text-emerald-400 border border-emerald-500/20' : 'bg-rose-950/20 text-rose-400 border border-rose-500/20'}`}>
                   <h4 className="font-bold text-xs uppercase tracking-wider mb-2 flex items-center gap-1.5">
@@ -800,16 +696,14 @@ export function InstructorAttendancePanel() {
           </div>
         )}
 
-        {/* 3. AUDIT RECORDS TABLE SUBTAB */}
+        {/* ── 3. AUDIT RECORDS TABLE ───────────────────────────────────────── */}
         {activeSubTab === 'records' && (
           <Card className="border-slate-800 bg-slate-950/20 backdrop-blur-xl rounded-3xl overflow-hidden shadow-xl animate-in fade-in duration-300">
-            {/* Filters bar */}
             <CardHeader className="flex flex-col gap-4 border-b border-slate-800/80 p-6 md:flex-row md:items-center md:justify-between">
               <div>
                 <CardTitle className="text-xl font-bold text-white">Attendance Audit Log</CardTitle>
                 <CardDescription className="text-xs text-slate-400">View, update, delete, and filter all attendance check-ins.</CardDescription>
               </div>
-
               <div className="flex flex-wrap gap-2 items-center">
                 <div className="relative flex-1 sm:flex-initial">
                   <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-500" />
@@ -820,29 +714,16 @@ export function InstructorAttendancePanel() {
                     className="pl-9 bg-slate-900/60 border-slate-800 rounded-xl h-9 text-xs w-full sm:w-44 placeholder:text-slate-600 focus-visible:ring-blue-500"
                   />
                 </div>
-
-                <select
-                  value={selectedCourseFilter}
-                  onChange={(e) => { setSelectedCourseFilter(e.target.value); setCurrentPage(1); }}
-                  className="bg-slate-900/60 border border-slate-800 rounded-xl h-9 text-xs text-slate-300 px-3 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                >
+                <select value={selectedCourseFilter} onChange={(e) => { setSelectedCourseFilter(e.target.value); setCurrentPage(1); }} className="bg-slate-900/60 border border-slate-800 rounded-xl h-9 text-xs text-slate-300 px-3 focus:outline-none focus:ring-1 focus:ring-blue-500">
                   <option value="all">All Courses</option>
-                  {professorCourses.map((c) => (
-                    <option key={c.id} value={c.id}>{c.title}</option>
-                  ))}
+                  {professorCourses.map((c) => (<option key={c.id} value={c.id}>{c.title}</option>))}
                 </select>
-
-                <select
-                  value={selectedStatusFilter}
-                  onChange={(e) => { setSelectedStatusFilter(e.target.value); setCurrentPage(1); }}
-                  className="bg-slate-900/60 border border-slate-800 rounded-xl h-9 text-xs text-slate-300 px-3 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                >
+                <select value={selectedStatusFilter} onChange={(e) => { setSelectedStatusFilter(e.target.value); setCurrentPage(1); }} className="bg-slate-900/60 border border-slate-800 rounded-xl h-9 text-xs text-slate-300 px-3 focus:outline-none focus:ring-1 focus:ring-blue-500">
                   <option value="all">All Statuses</option>
                   <option value="present">Present</option>
                   <option value="late">Late</option>
                   <option value="absent">Absent</option>
                 </select>
-
                 <Button onClick={handleExportCsv} variant="outline" size="sm" className="h-9 rounded-xl border-slate-800 bg-slate-900/40 text-slate-300 hover:text-white gap-1.5 text-xs">
                   <Download className="w-3.5 h-3.5" /> Export Excel
                 </Button>
@@ -890,12 +771,8 @@ export function InstructorAttendancePanel() {
                             <TableCell className="text-slate-400 text-xs py-3.5 max-w-[120px] truncate" title={log.remarks}>{log.remarks || '—'}</TableCell>
                             <TableCell className="text-right py-3.5">
                               <div className="flex justify-end gap-1.5">
-                                <Button onClick={() => handleOpenEdit(log)} variant="ghost" size="icon" className="h-7 w-7 text-blue-400 hover:bg-blue-950/20 hover:text-blue-300 rounded-lg">
-                                  <Edit className="w-3.5 h-3.5" />
-                                </Button>
-                                <Button onClick={() => void handleDeleteRecord(log)} variant="ghost" size="icon" className="h-7 w-7 text-rose-400 hover:bg-rose-950/20 hover:text-rose-300 rounded-lg">
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </Button>
+                                <Button onClick={() => handleOpenEdit(log)} variant="ghost" size="icon" className="h-7 w-7 text-blue-400 hover:bg-blue-950/20 hover:text-blue-300 rounded-lg"><Edit className="w-3.5 h-3.5" /></Button>
+                                <Button onClick={() => void handleDeleteRecord(log)} variant="ghost" size="icon" className="h-7 w-7 text-rose-400 hover:bg-rose-950/20 hover:text-rose-300 rounded-lg"><Trash2 className="w-3.5 h-3.5" /></Button>
                               </div>
                             </TableCell>
                           </TableRow>
@@ -903,14 +780,16 @@ export function InstructorAttendancePanel() {
                       </TableBody>
                     </Table>
                   </div>
-
-                  {/* Pagination Footer */}
                   {totalPages > 1 && (
                     <div className="flex items-center justify-between pt-4 border-t border-slate-900">
                       <span className="text-xs text-slate-500">Page {currentPage} of {totalPages}</span>
                       <div className="flex gap-2">
-                        <Button variant="outline" size="sm" disabled={currentPage === 1} onClick={() => setCurrentPage((p) => Math.max(1, p - 1))} className="h-8 rounded-lg border-slate-800 text-slate-300 bg-slate-950/20 hover:bg-slate-900">Previous</Button>
-                        <Button variant="outline" size="sm" disabled={currentPage === totalPages} onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))} className="h-8 rounded-lg border-slate-800 text-slate-300 bg-slate-950/20 hover:bg-slate-900">Next</Button>
+                        <Button variant="outline" size="sm" disabled={currentPage === 1} onClick={() => setCurrentPage((p) => Math.max(1, p - 1))} className="h-8 rounded-lg border-slate-800 text-slate-300 bg-slate-950/20 hover:bg-slate-900">
+                          <ChevronLeft className="w-4 h-4" /> Previous
+                        </Button>
+                        <Button variant="outline" size="sm" disabled={currentPage === totalPages} onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))} className="h-8 rounded-lg border-slate-800 text-slate-300 bg-slate-950/20 hover:bg-slate-900">
+                          Next <ChevronRight className="w-4 h-4" />
+                        </Button>
                       </div>
                     </div>
                   )}
@@ -920,37 +799,20 @@ export function InstructorAttendancePanel() {
           </Card>
         )}
 
-        {/* 4. REPORTS GENERATOR SUBTAB */}
+        {/* ── 4. REPORTS ───────────────────────────────────────────────────── */}
         {activeSubTab === 'reports' && (
           <div className="grid gap-6 md:grid-cols-[1fr_360px] items-start animate-in fade-in duration-300">
-            {/* Left: Generated Report Summary */}
             <Card className="border-slate-800 bg-slate-950/20 backdrop-blur-xl rounded-3xl overflow-hidden shadow-xl p-6 space-y-6">
               <div>
                 <h3 className="text-lg font-bold text-white capitalize">{reportType} Attendance Report</h3>
                 <p className="text-xs text-slate-400">Generated metric summaries matching active queries.</p>
               </div>
-
-              {/* Metrics Grid */}
               <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-                <div className="p-4 bg-slate-900/30 border border-slate-800/60 rounded-2xl text-center">
-                  <div className="text-2xl font-bold text-white">{reportMetrics.totalLogs}</div>
-                  <p className="text-[10px] text-slate-500 uppercase tracking-widest font-semibold mt-1">Total Scans</p>
-                </div>
-                <div className="p-4 bg-slate-900/30 border border-slate-800/60 rounded-2xl text-center">
-                  <div className="text-2xl font-bold text-emerald-400">{reportMetrics.present}</div>
-                  <p className="text-[10px] text-slate-500 uppercase tracking-widest font-semibold mt-1">Presents</p>
-                </div>
-                <div className="p-4 bg-slate-900/30 border border-slate-800/60 rounded-2xl text-center">
-                  <div className="text-2xl font-bold text-amber-400">{reportMetrics.late}</div>
-                  <p className="text-[10px] text-slate-500 uppercase tracking-widest font-semibold mt-1">Lates</p>
-                </div>
-                <div className="p-4 bg-slate-900/30 border border-slate-800/60 rounded-2xl text-center">
-                  <div className="text-2xl font-bold text-blue-400">{reportMetrics.rate}%</div>
-                  <p className="text-[10px] text-slate-500 uppercase tracking-widest font-semibold mt-1">Check-in Rate</p>
-                </div>
+                <div className="p-4 bg-slate-900/30 border border-slate-800/60 rounded-2xl text-center"><div className="text-2xl font-bold text-white">{reportMetrics.totalLogs}</div><p className="text-[10px] text-slate-500 uppercase tracking-widest font-semibold mt-1">Total Scans</p></div>
+                <div className="p-4 bg-slate-900/30 border border-slate-800/60 rounded-2xl text-center"><div className="text-2xl font-bold text-emerald-400">{reportMetrics.present}</div><p className="text-[10px] text-slate-500 uppercase tracking-widest font-semibold mt-1">Presents</p></div>
+                <div className="p-4 bg-slate-900/30 border border-slate-800/60 rounded-2xl text-center"><div className="text-2xl font-bold text-amber-400">{reportMetrics.late}</div><p className="text-[10px] text-slate-500 uppercase tracking-widest font-semibold mt-1">Lates</p></div>
+                <div className="p-4 bg-slate-900/30 border border-slate-800/60 rounded-2xl text-center"><div className="text-2xl font-bold text-blue-400">{reportMetrics.rate}%</div><p className="text-[10px] text-slate-500 uppercase tracking-widest font-semibold mt-1">Check-in Rate</p></div>
               </div>
-
-              {/* Student Rankings (Worst attendance lists) */}
               <div className="space-y-3">
                 <h4 className="text-sm font-bold text-slate-300">Pedagogical Alert: Top Absences / Low Check-ins</h4>
                 {reportMetrics.rankings.length === 0 ? (
@@ -966,7 +828,7 @@ export function InstructorAttendancePanel() {
                       </TableHeader>
                       <TableBody>
                         {reportMetrics.rankings.map((student) => (
-                          <TableRow key={student.number} className="border-b border-slate-850 hover:bg-slate-900/10">
+                          <TableRow key={student.number} className="border-b border-slate-800 hover:bg-slate-900/10">
                             <TableCell className="py-2.5 font-medium text-slate-200 text-xs">{student.name} ({student.number})</TableCell>
                             <TableCell className="py-2.5 text-center text-xs font-bold text-rose-400">{student.rate}% ({student.present}/{student.total})</TableCell>
                           </TableRow>
@@ -977,38 +839,23 @@ export function InstructorAttendancePanel() {
                 )}
               </div>
             </Card>
-
-            {/* Right: Report settings */}
             <Card className="border-slate-800 bg-slate-950/20 backdrop-blur-xl rounded-3xl p-5 space-y-4">
               <h3 className="text-sm font-bold text-slate-200">Report Scope</h3>
-
               <div className="space-y-1">
                 <label className="text-[10px] text-slate-500 uppercase tracking-widest font-bold">Report Type</label>
-                <select
-                  value={reportType}
-                  onChange={(e) => setReportType(e.target.value as ReportType)}
-                  className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-300 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                >
+                <select value={reportType} onChange={(e) => setReportType(e.target.value as ReportType)} className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-300 focus:outline-none focus:ring-1 focus:ring-blue-500">
                   <option value="daily">Daily Summary</option>
                   <option value="weekly">Weekly Summary</option>
                   <option value="monthly">Monthly Summary</option>
                 </select>
               </div>
-
               <div className="space-y-1">
                 <label className="text-[10px] text-slate-500 uppercase tracking-widest font-bold">Course Filter</label>
-                <select
-                  value={reportCourseId}
-                  onChange={(e) => setReportCourseId(e.target.value)}
-                  className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-300 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                >
+                <select value={reportCourseId} onChange={(e) => setReportCourseId(e.target.value)} className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-300 focus:outline-none focus:ring-1 focus:ring-blue-500">
                   <option value="all">All Courses</option>
-                  {professorCourses.map((c) => (
-                    <option key={c.id} value={c.id}>{c.title}</option>
-                  ))}
+                  {professorCourses.map((c) => (<option key={c.id} value={c.id}>{c.title}</option>))}
                 </select>
               </div>
-
               <div className="bg-slate-900/30 border border-slate-800/40 rounded-xl p-3 text-[10px] text-slate-500 leading-normal">
                 Reports compile scans dynamically across Firestore database collections, computing attendance ratios to flag student drop-offs.
               </div>
@@ -1016,34 +863,23 @@ export function InstructorAttendancePanel() {
           </div>
         )}
 
-        {/* Edit Record Modal dialog overlay */}
+        {/* Edit Record Modal */}
         {editLog && (
           <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
             <Card className="w-full max-w-md border border-slate-800 bg-slate-950 text-slate-100 rounded-2xl shadow-2xl overflow-hidden p-6 space-y-4">
               <h3 className="text-lg font-bold text-white border-b border-slate-800 pb-2">Audit Check-in: {editLog.name}</h3>
-
               <div className="space-y-1">
                 <label className="text-[10px] text-slate-500 uppercase tracking-widest font-bold">Status</label>
-                <select
-                  value={editStatus}
-                  onChange={(e) => setEditStatus(e.target.value as AttendanceStatus)}
-                  className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-300 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                >
+                <select value={editStatus} onChange={(e) => setEditStatus(e.target.value as AttendanceStatus)} className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-300 focus:outline-none focus:ring-1 focus:ring-blue-500">
                   <option value="present">Present</option>
                   <option value="late">Late</option>
                   <option value="absent">Absent</option>
                 </select>
               </div>
-
               <div className="space-y-1">
                 <label className="text-[10px] text-slate-500 uppercase tracking-widest font-bold">Remarks</label>
-                <Input
-                  value={editRemarks}
-                  onChange={(e) => setEditRemarks(e.target.value)}
-                  className="bg-[#05021a] border-slate-800 text-slate-200 h-10 rounded-xl text-sm"
-                />
+                <Input value={editRemarks} onChange={(e) => setEditRemarks(e.target.value)} className="bg-[#05021a] border-slate-800 text-slate-200 h-10 rounded-xl text-sm" />
               </div>
-
               <div className="flex gap-2 pt-2">
                 <Button onClick={handleSaveEdit} className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl h-10">Save Audit</Button>
                 <Button onClick={() => setEditLog(null)} variant="outline" className="flex-1 bg-slate-900 border-slate-800 text-slate-300 hover:bg-slate-800 rounded-xl h-10">Cancel</Button>
