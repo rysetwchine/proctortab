@@ -539,17 +539,28 @@ export const ExamInterface = ({ onFinish, examContext, assessment }: ExamInterfa
     };
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      const isPrintScreen = e.key === 'PrintScreen' || e.code === 'PrintScreen';
+      const isPrintScreen = e.key === 'PrintScreen' || e.code === 'PrintScreen' || e.key === 'Snapshot';
       const isSnipping = (e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 's';
       const isMacScreenshot = (e.ctrlKey || e.metaKey) && e.shiftKey && ['3', '4', '5'].includes(e.key);
 
       if (isPrintScreen || isSnipping || isMacScreenshot) {
         e.preventDefault();
+
+        // Instantly and synchronously cover the screen to prevent OS screenshot tools from capturing content
+        const syncOverlay = document.getElementById('screenshot-block-overlay-sync');
+        if (syncOverlay) {
+          syncOverlay.style.setProperty('display', 'block', 'important');
+        }
+
         // Instantly cover the screen to prevent question contents from being visible in the screenshot
         setShowScreenshotWarning(true);
 
         let details = 'PrintScreen key pressed (keydown).';
-        if (isSnipping) {
+        if (isPrintScreen && (e.metaKey || e.key === 'OS' || e.key === 'Win')) {
+          details = 'Windows + PrintScreen key combination pressed.';
+        } else if (isPrintScreen && e.altKey) {
+          details = 'Alt + PrintScreen key combination pressed.';
+        } else if (isSnipping) {
           details = 'Snipping Tool keyboard shortcut activated (Cmd/Ctrl + Shift + S).';
         } else if (isMacScreenshot) {
           details = `macOS Screenshot shortcut activated (Cmd/Ctrl + Shift + ${e.key}).`;
@@ -559,7 +570,7 @@ export const ExamInterface = ({ onFinish, examContext, assessment }: ExamInterfa
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
-      const isPrintScreen = e.key === 'PrintScreen' || e.code === 'PrintScreen';
+      const isPrintScreen = e.key === 'PrintScreen' || e.code === 'PrintScreen' || e.key === 'Snapshot';
       if (isPrintScreen) {
         e.preventDefault();
       }
@@ -995,10 +1006,17 @@ export const ExamInterface = ({ onFinish, examContext, assessment }: ExamInterfa
         }}
       />
 
+      {/* ═══ SYNCHRONOUS SOLID BLACK SCREENSHOT BLOCKER OVERLAY ═══ */}
+      <div
+        id="screenshot-block-overlay-sync"
+        className="fixed inset-0 z-[99998] bg-black"
+        style={{ display: 'none', backgroundColor: '#000000', pointerEvents: 'all' }}
+      />
+
       {/* ═══ SCREENSHOT RESTRICTION WARNING OVERLAY ═══ */}
       {showScreenshotWarning && (
         <div
-          className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
+          className="fixed inset-0 z-[99999] flex items-center justify-center p-4"
           style={{ background: 'rgba(0,0,0,0.95)', backdropFilter: 'blur(20px)' }}
         >
           <div
@@ -1022,6 +1040,10 @@ export const ExamInterface = ({ onFinish, examContext, assessment }: ExamInterfa
                 <button
                   onClick={() => {
                     setShowScreenshotWarning(false);
+                    const syncOverlay = document.getElementById('screenshot-block-overlay-sync');
+                    if (syncOverlay) {
+                      syncOverlay.style.setProperty('display', 'none');
+                    }
                     void clearRtdbAlert();
                   }}
                   className="flex-shrink-0 w-8 h-8 rounded-lg bg-slate-800/60 border border-slate-700/50 flex items-center justify-center text-slate-400 hover:text-white hover:bg-slate-700/60 transition-all"
@@ -1054,6 +1076,10 @@ export const ExamInterface = ({ onFinish, examContext, assessment }: ExamInterfa
               <button
                 onClick={() => {
                   setShowScreenshotWarning(false);
+                  const syncOverlay = document.getElementById('screenshot-block-overlay-sync');
+                  if (syncOverlay) {
+                    syncOverlay.style.setProperty('display', 'none');
+                  }
                   void clearRtdbAlert();
                 }}
                 className="w-full h-11 rounded-xl font-bold text-sm text-white transition-all hover:scale-[1.02] active:scale-[0.98]"
