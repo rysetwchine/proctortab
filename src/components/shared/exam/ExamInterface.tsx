@@ -165,7 +165,7 @@ export const ExamInterface = ({ onFinish, examContext, assessment }: ExamInterfa
     });
   }, [onFinish, clearRtdbAlert]);
 
-  const { formatTime, start, pause, deduct, compensate } = useExamTimer(timerSeconds, handleExpire);
+  const { formatTime, start, pause, deduct, compensate, timeLeft } = useExamTimer(timerSeconds, handleExpire);
 
   const openWarning = useCallback((title: string, message: string) => {
     setWarningTitle(title);
