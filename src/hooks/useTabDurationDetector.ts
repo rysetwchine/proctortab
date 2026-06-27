@@ -9,6 +9,7 @@ interface TabDurationEvent {
 interface Props {
   enabled: boolean;
   onTabSwitch: (event: TabDurationEvent) => void;
+  onTabLeave?: () => void;
   sharedLastViolationTimeRef?: React.MutableRefObject<number>;
 }
 
@@ -24,9 +25,11 @@ interface Props {
 export const useTabDurationDetector = ({
   enabled,
   onTabSwitch,
+  onTabLeave,
   sharedLastViolationTimeRef,
 }: Props) => {
   const onTabSwitchRef = useRef(onTabSwitch);
+  const onTabLeaveRef = useRef(onTabLeave);
   const lastDetectionTimeRef = useRef(0);
   const tabLeaveTimeRef = useRef<number | null>(null);
   const pendingReturnRef = useRef(false);
@@ -34,7 +37,8 @@ export const useTabDurationDetector = ({
 
   useEffect(() => {
     onTabSwitchRef.current = onTabSwitch;
-  }, [onTabSwitch]);
+    onTabLeaveRef.current = onTabLeave;
+  }, [onTabSwitch, onTabLeave]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -53,61 +57,67 @@ export const useTabDurationDetector = ({
       }
     };
 
-    const handleTabLeave = () => {
-      // Avoid overwriting if we already recorded a leave.
+    const handleLeave = () => {
       if (tabLeaveTimeRef.current !== null) return;
       tabLeaveTimeRef.current = Date.now();
       pendingReturnRef.current = true;
+      onTabLeaveRef.current?.();
     };
 
-    const handleTabReturn = () => {
-      // Prevent duplicate processing if no tab leave was recorded
+    const handleReturn = () => {
       if (tabLeaveTimeRef.current === null || !pendingReturnRef.current) return;
 
-      pendingReturnRef.current = false;
+      setTimeout(() => {
+        if (document.hidden || !document.hasFocus()) return;
 
-      const now = Date.now();
-      const durationMs = now - tabLeaveTimeRef.current;
-      // Use ceiling instead of round to avoid 0-second durations
-      const durationSeconds = Math.ceil(durationMs / 1000);
+        pendingReturnRef.current = false;
+        const now = Date.now();
+        const durationMs = now - tabLeaveTimeRef.current;
+        const durationSeconds = Math.ceil(durationMs / 1000);
+        tabLeaveTimeRef.current = null;
 
-      tabLeaveTimeRef.current = null;
+        const lastLocalDetection = lastDetectionTimeRef.current;
+        const lastSharedViolation = sharedLastViolationTimeRef?.current ?? 0;
+        const lastTime = Math.max(lastLocalDetection, lastSharedViolation);
 
-      // Check cooldowns to prevent duplicate deductions
-      const lastLocalDetection = lastDetectionTimeRef.current;
-      const lastSharedViolation = sharedLastViolationTimeRef?.current ?? 0;
-      const lastTime = Math.max(lastLocalDetection, lastSharedViolation);
-
-      // Only trigger if enough time has passed since last detection
-      if (now - lastTime >= DETECTION_COOLDOWN_MS) {
-        lastDetectionTimeRef.current = now;
-
-        // Update shared violation time if provided
-        if (sharedLastViolationTimeRef) {
-          sharedLastViolationTimeRef.current = now;
+        if (now - lastTime >= DETECTION_COOLDOWN_MS) {
+          lastDetectionTimeRef.current = now;
+          if (sharedLastViolationTimeRef) {
+            sharedLastViolationTimeRef.current = now;
+          }
+          const status = getStatusForDuration(durationSeconds);
+          onTabSwitchRef.current({
+            durationSeconds,
+            status,
+          });
         }
+      }, 100);
+    };
 
-        const status = getStatusForDuration(durationSeconds);
-        onTabSwitchRef.current({
-          durationSeconds,
-          status,
-        });
+    const onVisibilityChange = () => {
+      if (document.hidden) {
+        handleLeave();
+      } else {
+        handleReturn();
       }
     };
 
-    // Using Page Visibility API as primary detector (highly reliable and immune to dialog blurs)
-    const onVisibilityChange = () => {
-      if (document.hidden) {
-        handleTabLeave();
-      } else {
-        handleTabReturn();
-      }
+    const onWindowBlur = () => {
+      handleLeave();
+    };
+
+    const onWindowFocus = () => {
+      handleReturn();
     };
 
     document.addEventListener('visibilitychange', onVisibilityChange);
+    window.addEventListener('blur', onWindowBlur);
+    window.addEventListener('focus', onWindowFocus);
 
     return () => {
       document.removeEventListener('visibilitychange', onVisibilityChange);
+      window.removeEventListener('blur', onWindowBlur);
+      window.removeEventListener('focus', onWindowFocus);
     };
   }, [enabled, sharedLastViolationTimeRef]);
 };

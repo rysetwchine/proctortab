@@ -526,19 +526,36 @@ export const InstructorDashboard = ({ onNavigate }: InstructorDashboardProps) =>
 
                           <td className="p-4 text-slate-300">
                             {(() => {
-                              if (log.violationType === "mouse_boundary_exit") {
-                                const raw = log.deductedMinutes;
-                                const n = typeof raw === "number" ? raw : typeof raw === "string" ? Number(raw) : null;
-                                const ded = n == null || Number.isNaN(n) ? null : n;
-                                return ded != null ? <span className="font-semibold text-red-400">{ded} min deducted</span> : "Mouse boundary exit";
-                              }
+                              const classification = log.behaviorClassification || (
+                                log.durationSeconds != null && log.durationSeconds > 0
+                                  ? log.durationSeconds <= 1
+                                    ? 'Accidental'
+                                    : log.durationSeconds <= 3
+                                      ? 'Suspicious'
+                                      : 'Intentional'
+                                  : 'Intentional'
+                              );
 
-                              const raw = log.durationSeconds;
-                              const n = typeof raw === 'number' ? raw : typeof raw === 'string' ? Number(raw) : null;
-                              if (n == null || Number.isNaN(n)) return <span className="text-slate-500">—</span>;
+                              const rawTime = log.deductedTime ?? (log.deductedMinutes ? log.deductedMinutes * 60 : 0);
+                              const deductedMins = Math.round(rawTime / 60);
 
-                              const label = n <= 1 ? 'Accidental' : n < 3 ? 'Suspicious' : 'Intentional';
-                              return <>{n}s • <span className="font-semibold text-slate-200">{label}</span></>;
+                              return (
+                                <div className="space-y-1">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="text-slate-200 font-semibold">{classification}</span>
+                                    {deductedMins > 0 && (
+                                      <Badge variant="outline" className="bg-red-500/10 border-red-500/20 text-red-400 font-black">
+                                        -{deductedMins}m
+                                      </Badge>
+                                    )}
+                                  </div>
+                                  {log.warningMessage && (
+                                    <p className="text-[10px] text-slate-500 max-w-[220px] truncate" title={log.warningMessage}>
+                                      {log.warningMessage}
+                                    </p>
+                                  )}
+                                </div>
+                              );
                             })()}
                           </td>
 

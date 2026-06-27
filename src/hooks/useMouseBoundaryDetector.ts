@@ -7,6 +7,7 @@ interface Props {
   enabled: boolean;
   /** Called once per "exit" event, after edge-filter + cooldown pass. */
   onBoundaryExit: (cursor: CursorPosition) => void;
+  onUnusualMouseActivity?: (details: string) => void;
   /**
    * Shared cooldown reference to avoid stacking penalties from multiple detectors at once.
    * (e.g., tab switch + mouse exit occurring nearly simultaneously)
@@ -35,20 +36,28 @@ interface Props {
 export function useMouseBoundaryDetector({
   enabled,
   onBoundaryExit,
+  onUnusualMouseActivity,
   sharedLastViolationTimeRef,
   cooldownMs = 8000,
   ignoreEdgePx = 15,
 }: Props) {
   const onBoundaryExitRef = useRef(onBoundaryExit);
+  const onUnusualMouseActivityRef = useRef(onUnusualMouseActivity);
   const isOutsideRef = useRef(false);
   const lastDetectionTimeRef = useRef(0);
   const lastMovePosRef = useRef<CursorPosition>({ x: 0, y: 0 });
   const recentExitsRef = useRef<number[]>([]);
   const exitTimeoutRef = useRef<number | null>(null);
+  const clicksRef = useRef<number[]>([]);
+  const movesRef = useRef<{ x: number; y: number; time: number }[]>([]);
 
   useEffect(() => {
     onBoundaryExitRef.current = onBoundaryExit;
   }, [onBoundaryExit]);
+
+  useEffect(() => {
+    onUnusualMouseActivityRef.current = onUnusualMouseActivity;
+  }, [onUnusualMouseActivity]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -68,10 +77,70 @@ export function useMouseBoundaryDetector({
       onBoundaryExitRef.current(lastMovePosRef.current);
     };
 
+    const handleMouseActivity = (x: number, y: number) => {
+      const now = Date.now();
+      movesRef.current = movesRef.current.filter(m => now - m.time < 1000);
+      movesRef.current.push({ x, y, time: now });
+
+      if (movesRef.current.length >= 8) {
+        let totalDistance = 0;
+        let directionChanges = 0;
+        let lastDx = 0;
+        let lastDy = 0;
+
+        for (let i = 1; i < movesRef.current.length; i++) {
+          const prev = movesRef.current[i - 1];
+          const curr = movesRef.current[i];
+          const dx = curr.x - prev.x;
+          const dy = curr.y - prev.y;
+          totalDistance += Math.sqrt(dx * dx + dy * dy);
+
+          if (i > 1) {
+            const dxChanged = (dx > 0 && lastDx < 0) || (dx < 0 && lastDx > 0);
+            const dyChanged = (dy > 0 && lastDy < 0) || (dy < 0 && lastDy > 0);
+            if (dxChanged || dyChanged) {
+              directionChanges += 1;
+            }
+          }
+          lastDx = dx;
+          lastDy = dy;
+        }
+
+        if (totalDistance > 2500 && directionChanges > 10) {
+          const lastShared = sharedLastViolationTimeRef?.current ?? 0;
+          const lastTime = Math.max(lastDetectionTimeRef.current, lastShared);
+          if (now - lastTime >= cooldownMs) {
+            lastDetectionTimeRef.current = now;
+            if (sharedLastViolationTimeRef) sharedLastViolationTimeRef.current = now;
+            movesRef.current = [];
+            onUnusualMouseActivityRef.current?.('Unusual Mouse Activity: Rapid mouse shaking/jittering detected.');
+          }
+        }
+      }
+    };
+
+    const onClick = () => {
+      const now = Date.now();
+      clicksRef.current = clicksRef.current.filter(t => now - t < 1000);
+      clicksRef.current.push(now);
+
+      if (clicksRef.current.length >= 6) {
+        const lastShared = sharedLastViolationTimeRef?.current ?? 0;
+        const lastTime = Math.max(lastDetectionTimeRef.current, lastShared);
+        if (now - lastTime >= cooldownMs) {
+          lastDetectionTimeRef.current = now;
+          if (sharedLastViolationTimeRef) sharedLastViolationTimeRef.current = now;
+          clicksRef.current = [];
+          onUnusualMouseActivityRef.current?.('Unusual Mouse Activity: Rapid click spamming detected (6+ clicks in 1s).');
+        }
+      }
+    };
+
     const updateInsideStateFromMove = (e: MouseEvent) => {
       const x = e.clientX;
       const y = e.clientY;
       lastMovePosRef.current = { x, y };
+      handleMouseActivity(x, y);
 
       // When the user re-enters the viewport, clear any pending exit timeouts
       if (x >= 0 && y >= 0 && x <= window.innerWidth && y <= window.innerHeight) {
@@ -154,11 +223,13 @@ export function useMouseBoundaryDetector({
     document.addEventListener("mouseout", onMouseOut);
     const onMouseLeave = () => handleExit();
     document.documentElement.addEventListener("mouseleave", onMouseLeave);
+    window.addEventListener("click", onClick);
 
     return () => {
       window.removeEventListener("mousemove", throttledMouseMove);
       document.removeEventListener("mouseout", onMouseOut);
       document.documentElement.removeEventListener("mouseleave", onMouseLeave);
+      window.removeEventListener("click", onClick);
       if (exitTimeoutRef.current) {
         clearTimeout(exitTimeoutRef.current);
       }

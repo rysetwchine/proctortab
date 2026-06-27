@@ -77,6 +77,7 @@ export const ActiveExamsPanel = () => {
           totalQuestions: d.totalQuestions ?? 20,
           violations: d.violations ?? 0,
           status: d.status || 'Normal',
+          timeLeft: d.timeLeft || '—',
         };
       });
 
@@ -203,6 +204,7 @@ export const ActiveExamsPanel = () => {
                     <th className="px-4 py-2 text-left text-xs font-semibold uppercase">Progress</th>
                     <th className="px-4 py-2 text-left text-xs font-semibold uppercase">Question</th>
                     <th className="px-4 py-2 text-left text-xs font-semibold uppercase">Tab Switches</th>
+                    <th className="px-4 py-2 text-left text-xs font-semibold uppercase">Time Remaining</th>
                     <th className="px-4 py-2 text-left text-xs font-semibold uppercase">Status</th>
                     <th className="px-4 py-2 text-left text-xs font-semibold uppercase">Actions</th>
                   </tr>
@@ -233,6 +235,7 @@ export const ActiveExamsPanel = () => {
                           {student.violations}
                         </span>
                       </td>
+                      <td className="px-4 py-3 text-sm font-mono text-cyan-600 dark:text-cyan-400 font-bold">{student.timeLeft}</td>
                       <td className="px-4 py-3">
                         {student.violations > 2 ? (
                           <Badge variant="destructive">Warning</Badge>

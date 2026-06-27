@@ -51,36 +51,38 @@ export const TabMonitoringDashboard = () => {
   }, []);
 
   const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'Warning':
-        return 'bg-yellow-100 text-yellow-800 border-yellow-200';
-      case 'Suspicious':
-        return 'bg-orange-100 text-orange-800 border-orange-200';
-      case 'Violation':
-        return 'bg-red-100 text-red-800 border-red-200';
-      default:
-        return 'bg-gray-100 text-gray-800 border-gray-200';
+    const s = String(status || '').trim().toLowerCase();
+    if (s.includes('accidental') || s === 'warning') {
+      return 'bg-blue-500/10 text-blue-400 border-blue-500/30';
     }
+    if (s.includes('suspicious')) {
+      return 'bg-yellow-500/10 text-yellow-400 border-yellow-500/30';
+    }
+    if (s.includes('intentional') || s === 'violation') {
+      return 'bg-red-500/10 text-red-400 border-red-500/30';
+    }
+    return 'bg-slate-800 text-slate-400 border-slate-700';
   };
 
   const getStatusBgClass = (status: string) => {
-    switch (status) {
-      case 'Warning':
-        return 'bg-yellow-50';
-      case 'Suspicious':
-        return 'bg-orange-50';
-      case 'Violation':
-        return 'bg-red-50';
-      default:
-        return 'bg-gray-50';
+    const s = String(status || '').trim().toLowerCase();
+    if (s.includes('accidental') || s === 'warning') {
+      return 'bg-blue-950/10 hover:bg-blue-950/20';
     }
+    if (s.includes('suspicious')) {
+      return 'bg-yellow-950/10 hover:bg-yellow-950/20';
+    }
+    if (s.includes('intentional') || s === 'violation') {
+      return 'bg-red-950/20 hover:bg-red-950/30';
+    }
+    return 'hover:bg-slate-800/40';
   };
 
   const stats = {
     total: tabLogs.length,
-    warnings: tabLogs.filter((log) => log.status === 'Warning').length,
-    suspicious: tabLogs.filter((log) => log.status === 'Suspicious').length,
-    violations: tabLogs.filter((log) => log.status === 'Violation').length,
+    warnings: tabLogs.filter((log) => log.status === 'Warning' || log.behaviorClassification === 'Accidental').length,
+    suspicious: tabLogs.filter((log) => log.status === 'Suspicious' || log.behaviorClassification === 'Suspicious').length,
+    violations: tabLogs.filter((log) => log.status === 'Violation' || log.behaviorClassification === 'Intentional').length,
     autoSubmitted: tabLogs.filter((log) => log.autoSubmitted).length,
   };
 
@@ -106,7 +108,7 @@ export const TabMonitoringDashboard = () => {
         <div className="bg-slate-900/60 backdrop-blur-md border border-slate-700/50 rounded-xl shadow-lg p-6 hover:shadow-xl hover:border-yellow-500/30 transition-all duration-300">
           <div className="text-center">
             <p className="text-3xl font-bold text-yellow-400">{stats.warnings}</p>
-            <p className="text-sm text-slate-400 font-medium mt-2">Warnings</p>
+            <p className="text-sm text-slate-400 font-medium mt-2">Warnings (Accidental)</p>
           </div>
         </div>
 
@@ -120,7 +122,7 @@ export const TabMonitoringDashboard = () => {
         <div className="bg-slate-900/60 backdrop-blur-md border border-slate-700/50 rounded-xl shadow-lg p-6 hover:shadow-xl hover:border-red-500/30 transition-all duration-300">
           <div className="text-center">
             <p className="text-3xl font-bold text-red-400">{stats.violations}</p>
-            <p className="text-sm text-slate-400 font-medium mt-2">Violations</p>
+            <p className="text-sm text-slate-400 font-medium mt-2">Intentional Violations</p>
           </div>
         </div>
 
@@ -137,7 +139,7 @@ export const TabMonitoringDashboard = () => {
         <div className="sticky top-0 z-10 bg-gradient-to-r from-cyan-600/20 to-blue-600/20 border-b border-slate-700/50 px-6 py-4 backdrop-blur-md">
           <h3 className="flex items-center gap-2 text-lg font-bold text-white">
             <TrendingUp className="w-5 h-5 text-cyan-400" />
-            Tab Switch Monitoring Log
+            Tab Switch & Proctoring Monitoring Log
           </h3>
         </div>
         <div className="p-6">
@@ -153,61 +155,75 @@ export const TabMonitoringDashboard = () => {
                     <TableHead className="font-semibold">Student Name</TableHead>
                     <TableHead className="font-semibold">Assessment</TableHead>
                     <TableHead className="font-semibold">Violation Event</TableHead>
-                    <TableHead className="font-semibold">Details / Evidence</TableHead>
-                    <TableHead className="font-semibold text-center">
-                      Duration
-                    </TableHead>
-                    <TableHead className="font-semibold text-center">Status</TableHead>
+                    <TableHead className="font-semibold">Behavior Classification</TableHead>
+                    <TableHead className="font-semibold">Warning Displayed</TableHead>
+                    <TableHead className="font-semibold text-center">Deducted Time</TableHead>
+                    <TableHead className="font-semibold text-center">Strikes</TableHead>
                     <TableHead className="font-semibold text-center">Auto Submitted</TableHead>
                     <TableHead className="font-semibold">Time</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {tabLogs.map((log, idx) => (
-                    <TableRow
-                      key={log.id}
-                      className={`${getStatusBgClass(log.status)} ${
-                        idx % 2 === 0 ? '' : ''
-                      } hover:bg-opacity-75 transition-colors`}
-                    >
-                      <TableCell className="font-medium">{log.studentName}</TableCell>
-                      <TableCell>{log.assessmentTitle || 'Unknown'}</TableCell>
-                      <TableCell>
-                        <span className="font-semibold text-red-400">
-                          {log.violationType || log.violation || 'Tab Switch'}
-                        </span>
-                      </TableCell>
-                      <TableCell className="text-slate-300 max-w-[200px] truncate" title={log.evidence || 'Blurred browser window.'}>
-                        {log.evidence || 'Blurred browser window.'}
-                      </TableCell>
-                      <TableCell className="text-center font-semibold">
-                        {log.durationSeconds != null && log.durationSeconds > 0 ? `${log.durationSeconds}s` : '—'}
-                      </TableCell>
-                      <TableCell className="text-center">
-                        <Badge
-                          variant="outline"
-                          className={`${getStatusColor(log.status)} font-semibold`}
-                        >
-                          {log.status}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-center">
-                        {log.autoSubmitted ? (
-                          <Badge className="bg-red-600 hover:bg-red-700 gap-1">
-                            <AlertTriangle className="w-3 h-3" />
-                            Auto Submitted
+                  {tabLogs.map((log, idx) => {
+                    const classification = log.behaviorClassification || (
+                      log.durationSeconds != null && log.durationSeconds > 0
+                        ? log.durationSeconds <= 1
+                          ? 'Accidental'
+                          : log.durationSeconds <= 3
+                            ? 'Suspicious'
+                            : 'Intentional'
+                        : 'Intentional'
+                    );
+
+                    return (
+                      <TableRow
+                        key={log.id}
+                        className={`${getStatusBgClass(classification)} hover:bg-opacity-75 transition-colors`}
+                      >
+                        <TableCell className="font-medium text-white">{log.studentName}</TableCell>
+                        <TableCell className="text-slate-350">{log.assessmentTitle || 'Unknown'}</TableCell>
+                        <TableCell>
+                          <span className="font-semibold text-red-400">
+                            {log.violationType || log.violation || 'Tab Switch'}
+                          </span>
+                        </TableCell>
+                        <TableCell>
+                          <Badge
+                            variant="outline"
+                            className={`${getStatusColor(classification)} font-semibold`}
+                          >
+                            {classification}
                           </Badge>
-                        ) : (
-                          <span className="text-muted-foreground text-sm">—</span>
-                        )}
-                      </TableCell>
-                      <TableCell className="text-sm text-muted-foreground">
-                        {log.timestamp
-                          ? new Date(log.timestamp.toDate?.() || log.timestamp).toLocaleTimeString()
-                          : 'N/A'}
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                        </TableCell>
+                        <TableCell className="text-slate-300 max-w-[200px] truncate" title={log.warningMessage || log.evidence || 'Warning displayed.'}>
+                          {log.warningMessage || log.evidence || 'Warning displayed.'}
+                        </TableCell>
+                        <TableCell className="text-center font-semibold text-red-400">
+                          {log.deductedTime != null && log.deductedTime > 0
+                            ? `-${Math.round(log.deductedTime / 60)} min`
+                            : 'None'}
+                        </TableCell>
+                        <TableCell className="text-center font-bold text-slate-300">
+                          {log.intentionalViolationCount != null ? `${log.intentionalViolationCount}/3` : '—'}
+                        </TableCell>
+                        <TableCell className="text-center">
+                          {log.autoSubmitted ? (
+                            <Badge className="bg-red-600 hover:bg-red-700 gap-1">
+                              <AlertTriangle className="w-3 h-3" />
+                              Auto Submitted
+                            </Badge>
+                          ) : (
+                            <span className="text-muted-foreground text-sm">—</span>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-sm text-muted-foreground">
+                          {log.timestamp
+                            ? new Date(log.timestamp.toDate?.() || log.timestamp).toLocaleTimeString()
+                            : 'N/A'}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
                 </TableBody>
               </Table>
             </div>

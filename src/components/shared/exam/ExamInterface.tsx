@@ -9,6 +9,7 @@ import { ConnectionStatusIndicator } from './ConnectionStatusIndicator';
 import { useExamTimer } from '@/hooks/UseExamTimer';
 import { useTabDurationDetector } from '@/hooks/useTabDurationDetector';
 import { useMouseBoundaryDetector } from '@/hooks/useMouseBoundaryDetector';
+
 import { useSettings } from '@/hooks/useSettings';
 import { useNetworkCompensation } from '@/hooks/useNetworkCompensation';
 import { useCheatingDetector } from '@/hooks/useCheatingDetector';
@@ -64,8 +65,7 @@ export const ExamInterface = ({ onFinish, examContext, assessment }: ExamInterfa
   const [currentTime, setCurrentTime] = useState(() => new Date());
   const [sessionBlock, setSessionBlock] = useState<{ isBlocked: boolean; reason?: string }>({ isBlocked: false });
   const [saveStatus, setSaveStatus] = useState<'saving' | 'saved'>('saved');
-  const [showDesktopWarning, setShowDesktopWarning] = useState(false);
-  const [desktopWarningCount, setDesktopWarningCount] = useState(0);
+
   const [showScreenshotWarning, setShowScreenshotWarning] = useState(false);
 
   // Dynamic watermark state and triggers
@@ -288,24 +288,42 @@ export const ExamInterface = ({ onFinish, examContext, assessment }: ExamInterfa
     },
   });
 
-  // Synchronize student's active exam progress to Firestore in real-time
+  const timeLeftRef = useRef(timerSeconds);
+
+  // Sync ref with actual timeLeft
   useEffect(() => {
+    timeLeftRef.current = timeLeft;
+  }, [timeLeft]);
+
+  const pendingPenaltyRef = useRef<number>(0);
+  const tabLeaveTimeRef = useRef<number | null>(null);
+
+  // Synchronize student's active exam progress to Firestore in real-time
+  const syncActiveExamStatus = useCallback((customStatus?: string) => {
     if (!studentId || !assessment?.id) return;
     const docRef = doc(db, 'active_exam_students', `${studentId}_${assessment.id}`);
     
-    const totalQuestions = sessionQuestions.length;
-    const answersCount = Object.keys(answers).length;
+    const totalQuestions = sessionQuestionsRef.current.length;
+    const answersCount = Object.keys(answersRef.current).length;
     const progressPercent = totalQuestions > 0 ? Math.round((answersCount / totalQuestions) * 100) : 0;
     
-    // Count tab switch / violation events
-    const violationsCount = events.length;
+    const violationsCount = eventsRef.current.length;
     
-    let currentStatus = 'Normal';
-    if (violationsCount > 2) {
-      currentStatus = 'Violation';
-    } else if (violationsCount > 0) {
-      currentStatus = 'Suspicious';
+    let currentStatus = customStatus;
+    if (!currentStatus) {
+      if (violationsCount > 2) {
+        currentStatus = 'Violation';
+      } else if (violationsCount > 0) {
+        currentStatus = 'Suspicious';
+      } else {
+        currentStatus = 'Normal';
+      }
     }
+
+    const activeTimeLeft = timeLeftRef.current;
+    const minutes = Math.floor(activeTimeLeft / 60);
+    const seconds = activeTimeLeft % 60;
+    const formattedTimeLeft = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
 
     const payload = {
       studentId,
@@ -321,6 +339,7 @@ export const ExamInterface = ({ onFinish, examContext, assessment }: ExamInterfa
       progress: progressPercent,
       violations: violationsCount,
       status: currentStatus,
+      timeLeft: formattedTimeLeft,
       lastActivity: new Date(),
     };
 
@@ -336,9 +355,15 @@ export const ExamInterface = ({ onFinish, examContext, assessment }: ExamInterfa
     examContext?.assessmentId,
     examContext?.courseTitle,
     currentQuestionIndex,
-    sessionQuestions.length,
+  ]);
+
+  useEffect(() => {
+    syncActiveExamStatus();
+  }, [
+    currentQuestionIndex,
     answers,
     events,
+    syncActiveExamStatus,
   ]);
 
   // Clean up student status from Firestore when exiting the exam page (unmounting)
@@ -353,113 +378,85 @@ export const ExamInterface = ({ onFinish, examContext, assessment }: ExamInterfa
     };
   }, [studentId, assessment?.id]);
 
-  // Background interval for continuous time deduction while student is away in another tab
-  useEffect(() => {
-    if (!tabEnabled || isExamDisabled || isAutoSubmitted) return;
+  // Tab switch departure and return handlers
+  const handleTabLeave = useCallback(() => {
+    if (isExamDisabled || isAutoSubmitted) return;
 
-    let backgroundInterval: number | null = null;
-    let leaveTimestamp = 0;
-    let totalDeductionsApplied = 0;
+    const penalty = isQuiz ? 300 : 600;
+    tabLeaveTimeRef.current = Date.now();
+    pendingPenaltyRef.current = penalty;
 
-    const handleVisibilityChange = () => {
-      if (document.hidden) {
-        leaveTimestamp = Date.now();
-        totalDeductionsApplied = 0;
-        
-        backgroundInterval = window.setInterval(() => {
-          const elapsedSeconds = Math.floor((Date.now() - leaveTimestamp) / 1000);
-          const expectedDeductions = Math.floor(elapsedSeconds / 10);
-          
-          if (expectedDeductions > totalDeductionsApplied) {
-            const newDeductions = expectedDeductions - totalDeductionsApplied;
-            totalDeductionsApplied = expectedDeductions;
-            
-            const deductionAmount = (isQuiz ? 300 : 600) * newDeductions;
-            deduct(deductionAmount);
-            
-            registerEvent(
-              'Continuous Tab Switch Penalty',
-              `Remained in another tab/window for ${expectedDeductions * 10}s. Continuous deduction of ${isQuiz ? '5 mins' : '10 mins'} applied.`
-            );
-          }
-        }, 1000);
-      } else {
-        if (leaveTimestamp > 0) {
-          const elapsedSeconds = Math.floor((Date.now() - leaveTimestamp) / 1000);
-          const expectedDeductions = Math.floor(elapsedSeconds / 10);
-          
-          if (expectedDeductions > totalDeductionsApplied) {
-            const newDeductions = expectedDeductions - totalDeductionsApplied;
-            const deductionAmount = (isQuiz ? 300 : 600) * newDeductions;
-            deduct(deductionAmount);
-            
-            registerEvent(
-              'Continuous Tab Switch Penalty',
-              `Remained in another tab/window for ${expectedDeductions * 10}s. Applied final catch-up deduction.`
-            );
-          }
-        }
-        
-        if (backgroundInterval) {
-          window.clearInterval(backgroundInterval);
-          backgroundInterval = null;
-        }
-        leaveTimestamp = 0;
-        totalDeductionsApplied = 0;
-      }
-    };
+    // Apply penalty to local timer immediately
+    deduct(penalty);
+    // Optimistically update ref so the sync call has the correct time
+    timeLeftRef.current = Math.max(0, timeLeftRef.current - penalty);
 
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      if (backgroundInterval) {
-        window.clearInterval(backgroundInterval);
-      }
-    };
-  }, [tabEnabled, isExamDisabled, isAutoSubmitted, isQuiz, deduct, registerEvent]);
-
-  // ─── Multi-Desktop / Virtual Desktop Overlay ────────────────────────────
-  // We detect virtual desktop switches by listening to visibilitychange.
-  // A separate listener here ONLY shows the visual warning overlay.
-  // The actual violation is already logged by useTabDurationDetector below
-  // (both a tab switch and a virtual desktop switch hide the page).
-  // We do NOT call registerEvent here to avoid double-counting.
-  useEffect(() => {
-    if (!tabEnabled) return;
-
-    const handlePageHide = () => {
-      if (document.hidden) {
-        // Show the multi-desktop/tab warning overlay immediately when page is hidden
-        setShowDesktopWarning(true);
-        setDesktopWarningCount((c) => c + 1);
-      }
-    };
-
-    document.addEventListener('visibilitychange', handlePageHide);
-    return () => document.removeEventListener('visibilitychange', handlePageHide);
-  }, [tabEnabled]);
-
-  // Keep eventsRef always current so handleExpire can read it without referencing events before init
-  useEffect(() => {
-    eventsRef.current = events;
-  }, [events]);
+    // Sync state to database immediately as a Violation
+    syncActiveExamStatus('Violation');
+  }, [isExamDisabled, isAutoSubmitted, isQuiz, deduct, syncActiveExamStatus]);
 
   const handleTabDurationSwitch = useCallback(
     (event: { durationSeconds: number; status: 'Warning' | 'Suspicious' | 'Violation' }) => {
       const { durationSeconds } = event;
-      registerEvent(
-        'Tab Switch',
-        `Switched tabs/blurred browser window for ${durationSeconds} second(s).`,
-        durationSeconds
-      );
+      const initialPenalty = pendingPenaltyRef.current;
+
+      if (durationSeconds <= 3) {
+        // Refund the penalty since it was within the grace period (accidental or suspicious only)
+        if (initialPenalty > 0) {
+          compensate(initialPenalty);
+          timeLeftRef.current = timeLeftRef.current + initialPenalty;
+          pendingPenaltyRef.current = 0;
+        }
+
+        // Sync refunded status immediately
+        syncActiveExamStatus();
+
+        if (durationSeconds <= 1) {
+          openWarning(
+            'Accidental Activity Detected',
+            'Warning: Tab switching detected. Please remain on the assessment page.'
+          );
+        } else {
+          openWarning(
+            'Suspicious Activity Detected',
+            'Warning: Tab switching detected. Please remain on the assessment page.'
+          );
+        }
+      } else {
+        // Confirmed violation - keep the initial penalty and log it permanently
+        pendingPenaltyRef.current = 0;
+
+        registerEvent(
+          'Tab Switch',
+          `Switched tabs/blurred browser window for ${durationSeconds} second(s).`,
+          durationSeconds,
+          true // Pass true to prevent double deduction
+        );
+
+        // Deduct extra continuous penalty for remaining away long (every 10 seconds)
+        const continuousIntervals = Math.floor(durationSeconds / 10);
+        if (continuousIntervals > 0) {
+          const continuousPenalty = (isQuiz ? 300 : 600) * continuousIntervals;
+          deduct(continuousPenalty);
+          timeLeftRef.current = Math.max(0, timeLeftRef.current - continuousPenalty);
+
+          registerEvent(
+            'Continuous Tab Switch Penalty',
+            `Remained in another tab/window for ${continuousIntervals * 10}s. Additional continuous deduction applied.`,
+            durationSeconds,
+            false // Deduct this continuous penalty
+          );
+        }
+      }
     },
-    [registerEvent]
+    [compensate, deduct, registerEvent, openWarning, isQuiz, syncActiveExamStatus]
   );
 
   // Tab Exit hook
   useTabDurationDetector({
     enabled: tabEnabled,
     onTabSwitch: handleTabDurationSwitch,
+    onTabLeave: handleTabLeave,
     sharedLastViolationTimeRef: lastViolationTimeRef,
   });
 
@@ -473,8 +470,17 @@ export const ExamInterface = ({ onFinish, examContext, assessment }: ExamInterfa
         `Moved cursor outside browser workspace boundaries (X: ${pos.x}, Y: ${pos.y}).`
       );
       triggerWatermarkProminent();
+    },
+    onUnusualMouseActivity: (details) => {
+      registerEvent('Unusual Mouse Activity', details);
+      triggerWatermarkProminent();
     }
   });
+
+  // Keep eventsRef always current so handleExpire can read it without referencing events before init
+  useEffect(() => {
+    eventsRef.current = events;
+  }, [events]);
 
   // Clipboard override handlers — only active when copyPasteEnabled
   useEffect(() => {
@@ -1092,82 +1098,7 @@ export const ExamInterface = ({ onFinish, examContext, assessment }: ExamInterfa
         </div>
       )}
 
-      {/* ═══ VIRTUAL DESKTOP / MULTI-DESKTOP WARNING OVERLAY ═══ */}
-      {showDesktopWarning && (
-        <div
-          className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
-          style={{ background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(16px)' }}
-        >
-          <div
-            className="relative w-full max-w-lg rounded-3xl overflow-hidden shadow-[0_0_80px_rgba(239,68,68,0.4)] border border-rose-500/50 animate-in zoom-in-90 duration-200"
-            style={{ background: 'linear-gradient(135deg, rgba(20,5,5,0.97) 0%, rgba(40,8,8,0.95) 100%)' }}
-          >
-            {/* Red shimmer top */}
-            <div className="h-1 w-full bg-gradient-to-r from-rose-700 via-red-500 to-rose-700" />
 
-            <div className="p-7 space-y-5">
-              {/* Icon + heading */}
-              <div className="flex items-start gap-4">
-                <div className="flex-shrink-0 w-14 h-14 rounded-2xl bg-rose-500/15 border border-rose-500/35 flex items-center justify-center shadow-[0_0_20px_rgba(239,68,68,0.25)]">
-                  <Monitor className="w-7 h-7 text-rose-400" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-[10px] font-black uppercase tracking-widest text-rose-500/80 mb-1">ProctorTab Security Alert</p>
-                  <h2 className="text-xl font-black text-white leading-tight">Multi-Desktop Activity Detected</h2>
-                  <p className="text-xs text-rose-400/80 mt-1 font-semibold">Detection #{desktopWarningCount}</p>
-                </div>
-                <button
-                  onClick={() => setShowDesktopWarning(false)}
-                  className="flex-shrink-0 w-8 h-8 rounded-lg bg-slate-800/60 border border-slate-700/50 flex items-center justify-center text-slate-400 hover:text-white hover:bg-slate-700/60 transition-all"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-
-              {/* Alert message */}
-              <div className="rounded-2xl border border-rose-500/25 bg-rose-500/5 p-4 space-y-2">
-                <p className="text-sm text-slate-200 leading-relaxed">
-                  The system has detected that you switched to a <strong className="text-rose-300">different virtual desktop</strong> (e.g., Desktop 2, Task View, or macOS Spaces) while this exam was active.
-                </p>
-                <p className="text-xs text-slate-400 leading-relaxed">
-                  This has been <strong className="text-rose-400">flagged and logged</strong> to your instructor's monitoring dashboard. Multiple occurrences may result in automatic submission.
-                </p>
-              </div>
-
-              {/* Violation counter */}
-              <div className="grid grid-cols-2 gap-3">
-                <div className="bg-slate-900/50 border border-slate-800/60 rounded-xl p-3 text-center">
-                  <p className="text-[10px] uppercase tracking-widest text-slate-500 font-bold">Tab/Desktop Switches</p>
-                  <p className="text-2xl font-black text-rose-400 mt-1">{desktopWarningCount}</p>
-                </div>
-                <div className="bg-slate-900/50 border border-slate-800/60 rounded-xl p-3 text-center">
-                  <p className="text-[10px] uppercase tracking-widest text-slate-500 font-bold">Intentional Switches</p>
-                  <p className={`text-2xl font-black mt-1 ${intentionalSwitchCount >= 2 ? 'text-rose-400 animate-pulse' : 'text-amber-400'}`}>
-                    {intentionalSwitchCount}<span className="text-sm text-slate-500">/3</span>
-                  </p>
-                </div>
-              </div>
-
-              {/* Warning level */}
-              <div className="flex items-center gap-3 text-xs text-slate-400 bg-slate-950/40 border border-slate-800/50 rounded-xl p-3">
-                <AlertTriangle className="w-4 h-4 text-amber-400 flex-shrink-0" />
-                <span>
-                  <strong className="text-white">Reminder:</strong> You must remain on this exam page at all times. Switching virtual desktops, opening other applications, or leaving the browser will be recorded as a violation.
-                </span>
-              </div>
-
-              {/* Dismiss button */}
-              <button
-                onClick={() => setShowDesktopWarning(false)}
-                className="w-full h-11 rounded-xl font-bold text-sm text-white transition-all hover:scale-[1.02] active:scale-[0.98]"
-                style={{ background: 'linear-gradient(135deg, #dc2626 0%, #b91c1c 100%)', boxShadow: '0 0 20px rgba(220,38,38,0.25)' }}
-              >
-                I Understand — Return to Exam
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </MotionBackground>
   );
 };

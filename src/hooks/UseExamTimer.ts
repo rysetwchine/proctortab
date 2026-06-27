@@ -10,20 +10,35 @@ export const useExamTimer = (initialTime: number, onExpire?: () => void) => {
     onExpireRef.current = onExpire;
   }, [onExpire]);
 
+  const lastTickRef = useRef<number | null>(null);
+
   useEffect(() => {
     if (!isRunning) {
+      lastTickRef.current = null;
       return;
     }
 
+    lastTickRef.current = Date.now();
+
     intervalRef.current = setInterval(() => {
-      setTimeLeft((prev) => {
-        if (prev <= 1) {
-          setIsRunning(false);
-          onExpireRef.current?.();
-          return 0;
-        }
-        return prev - 1;
-      });
+      const now = Date.now();
+      const elapsedMs = now - (lastTickRef.current ?? now);
+      lastTickRef.current = now;
+      const elapsedSeconds = Math.round(elapsedMs / 1000);
+
+      if (elapsedSeconds > 0) {
+        setTimeLeft((prev) => {
+          const nextTime = prev - elapsedSeconds;
+          if (nextTime <= 0) {
+            setIsRunning(false);
+            setTimeout(() => {
+              onExpireRef.current?.();
+            }, 0);
+            return 0;
+          }
+          return nextTime;
+        });
+      }
     }, 1000);
 
     return () => {
