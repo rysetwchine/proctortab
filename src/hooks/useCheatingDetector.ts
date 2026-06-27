@@ -67,10 +67,10 @@ export const useCheatingDetector = ({
 
       if (isTabEvent) {
         const secs = durationSeconds ?? 0;
-        if (secs <= 1.5) {
+        if (secs <= 1) {
           score = 8;
           eventType = 'Accidental Tab Switch';
-        } else if (secs <= 4) {
+        } else if (secs <= 3) {
           score = 15;
           eventType = 'Suspicious Tab Switch';
         } else {
@@ -226,27 +226,12 @@ export const useCheatingDetector = ({
 
       // Calculate specific time deduction (penalty) based on cheating event type and assessment type
       let penaltySeconds = 0;
-      const lowerEvent = eventType.toLowerCase();
-      const lowerRaw = rawType.toLowerCase();
 
       if (eventType === 'Accidental Tab Switch') {
-        penaltySeconds = isQuiz ? 60 : 120; // 1 min for quiz, 2 mins for exam
-      } else if (eventType === 'Suspicious Tab Switch') {
-        penaltySeconds = isQuiz ? 180 : 300; // 3 mins for quiz, 5 mins for exam
-      } else if (eventType === 'Intentional Tab Switch') {
-        penaltySeconds = isQuiz ? 300 : 600; // 5 mins for quiz, 10 mins for exam
-      } else if (lowerEvent.includes('fullscreen') || lowerRaw.includes('fullscreen')) {
-        penaltySeconds = isQuiz ? 300 : 600; // 5 mins for quiz, 10 mins for exam
-      } else if (lowerEvent.includes('mouse') || lowerRaw.includes('mouse')) {
-        penaltySeconds = isQuiz ? 60 : 180; // 1 min for quiz, 3 mins for exam
-      } else if (lowerEvent.includes('copy') || lowerEvent.includes('paste') || lowerRaw.includes('clipboard') || lowerRaw.includes('copy') || lowerRaw.includes('paste')) {
-        penaltySeconds = isQuiz ? 120 : 300; // 2 mins for quiz, 5 mins for exam
-      } else if (lowerEvent.includes('screenshot') || lowerEvent.includes('printscreen') || lowerRaw.includes('screenshot') || lowerRaw.includes('printscreen') || lowerRaw.includes('snip')) {
-        penaltySeconds = isQuiz ? 300 : 600; // 5 mins for quiz, 10 mins for exam
-      } else if (lowerEvent.includes('shortcut') || lowerEvent.includes('keyboard') || lowerRaw.includes('shortcut') || lowerRaw.includes('keyboard')) {
-        penaltySeconds = isQuiz ? 120 : 300; // 2 mins for quiz, 5 mins for exam
+        penaltySeconds = 0; // warning only, no time deduction!
       } else {
-        penaltySeconds = isQuiz ? 120 : 300; // default fallback: 2 mins for quiz, 5 mins for exam
+        // Any other cheating attempt (including Suspicious/Intentional Tab Switch, mouse, copy-paste, screenshot, fullscreen, etc.)
+        penaltySeconds = isQuiz ? 300 : 600; // Quiz: 5 minutes, Exam: 10 minutes
       }
 
       // Log detailed violation data to Firestore
