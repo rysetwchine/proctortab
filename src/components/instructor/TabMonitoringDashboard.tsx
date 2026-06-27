@@ -12,17 +12,27 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { AlertTriangle, TrendingUp } from 'lucide-react';
 import type { MouseBoundaryViolationLog, TabLog } from '@/types';
+import { useSession } from '@/hooks/useSession';
 
 /**
  * Professor monitoring dashboard for real-time tab switch tracking
  * Displays all tab switch events with duration, status, and auto-submit status
  */
 export const TabMonitoringDashboard = () => {
+  const { sessions } = useSession();
+  const myCourseIds = sessions.map((s) => String(s.id));
   const [violations, setViolations] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [selectedSection, setSelectedSection] = useState('All Sections');
 
   useEffect(() => {
-    // Query ALL violations in real-time ordered by timestamp
+    if (myCourseIds.length === 0) {
+      setViolations([]);
+      setLoading(false);
+      return;
+    }
+
+    // Query violations in real-time ordered by timestamp
     const q = query(collection(db, 'assessment_violations'), orderBy('timestamp', 'desc'));
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
@@ -30,12 +40,14 @@ export const TabMonitoringDashboard = () => {
         id: doc.id,
         ...doc.data(),
       }));
-      setViolations(list);
+      // Enforce Professor Data Isolation
+      const filtered = list.filter((v: any) => myCourseIds.includes(String(v.courseId)));
+      setViolations(filtered);
       setLoading(false);
     });
 
     return () => unsubscribe();
-  }, []);
+  }, [sessions]);
 
   const getStatusColor = (classification: string) => {
     const c = String(classification || '').trim().toLowerCase();
@@ -65,27 +77,32 @@ export const TabMonitoringDashboard = () => {
     return 'hover:bg-slate-800/40';
   };
 
+  const filteredViolations = violations.filter((v) => {
+    if (selectedSection === 'All Sections') return true;
+    return String(v.studentSection || v.section || '').trim() === selectedSection;
+  });
+
   const stats = {
-    total: violations.length,
-    warnings: violations.filter(
+    total: filteredViolations.length,
+    warnings: filteredViolations.filter(
       (v) =>
         v.behaviorClassification === 'Accidental' ||
         v.severityLevel === 'Warning' ||
         v.status === 'Warning'
     ).length,
-    suspicious: violations.filter(
+    suspicious: filteredViolations.filter(
       (v) =>
         v.behaviorClassification === 'Suspicious' ||
         v.severityLevel === 'Suspicious' ||
         v.status === 'Suspicious'
     ).length,
-    violations: violations.filter(
+    violations: filteredViolations.filter(
       (v) =>
         v.behaviorClassification === 'Intentional' ||
         v.severityLevel === 'Confirmed Violation' ||
         v.status === 'Violation'
     ).length,
-    autoSubmitted: violations.filter((v) => v.autoSubmitted).length,
+    autoSubmitted: filteredViolations.filter((v) => v.autoSubmitted).length,
   };
 
   if (loading) {
@@ -98,6 +115,27 @@ export const TabMonitoringDashboard = () => {
 
   return (
     <div className="space-y-6">
+      {/* Title & Section Filter Select dropdown */}
+      <div className="flex items-center justify-between">
+        <h2 className="text-xl font-bold text-white tracking-wide flex items-center gap-2">
+          <AlertTriangle className="w-5 h-5 text-amber-500" />
+          Live Student Monitoring
+        </h2>
+        <div className="flex items-center gap-3">
+          <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Filter Section:</span>
+          <select
+            value={selectedSection}
+            onChange={(e) => setSelectedSection(e.target.value)}
+            className="px-4 py-2 bg-slate-900 border border-slate-700 rounded-xl text-white text-xs focus:outline-none focus:border-cyan-500/50"
+          >
+            <option value="All Sections">All Sections</option>
+            <option value="Section A">Section A</option>
+            <option value="Section B">Section B</option>
+            <option value="Section C">Section C</option>
+            <option value="Section D">Section D</option>
+          </select>
+        </div>
+      </div>
       {/* Statistics Cards - Dark Glassmorphism */}
       <div className="grid grid-cols-5 gap-4">
         <div className="bg-slate-900/60 backdrop-blur-md border border-slate-700/50 rounded-xl shadow-lg p-6 hover:shadow-xl hover:border-blue-500/30 transition-all duration-300">
@@ -145,9 +183,9 @@ export const TabMonitoringDashboard = () => {
           </h3>
         </div>
         <div className="p-6">
-          {violations.length === 0 ? (
+          {filteredViolations.length === 0 ? (
             <p className="text-center text-muted-foreground py-8">
-              No proctoring violation logs recorded yet
+              No proctoring violation logs recorded yet for this section
             </p>
           ) : (
             <div className="border border-slate-700 rounded-lg overflow-hidden">
@@ -166,7 +204,7 @@ export const TabMonitoringDashboard = () => {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {violations.map((log) => {
+                  {filteredViolations.map((log) => {
                     const isMouse = String(log.violationType || '').toLowerCase().includes('mouse');
                     const classification = isMouse 
                       ? 'Suspicious'
@@ -188,6 +226,7 @@ export const TabMonitoringDashboard = () => {
                         <TableCell className="font-medium text-white">
                           <div className="font-bold text-slate-100">{log.studentName}</div>
                           <div className="text-xs text-slate-400 font-mono">ID: {log.studentNumber || log.studentId || 'N/A'}</div>
+                          <div className="text-[11px] text-cyan-400 font-semibold">{log.studentSection || log.section || 'N/A'}</div>
                         </TableCell>
                         <TableCell className="text-slate-350">
                           <div className="font-semibold text-slate-200">{log.assessmentTitle || 'Unknown'}</div>

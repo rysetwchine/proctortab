@@ -249,11 +249,17 @@ export const useCheatingDetector = ({
         }
       }
 
+      // Retrieve student section from user localStorage
+      const storedUser = JSON.parse(localStorage.getItem('user') || '{}');
+      const studentSection = storedUser?.section || '';
+
       // Write logs in real-time
       const payload = {
         studentId,
         studentName,
         studentNumber,
+        studentSection,
+        courseId: examContext?.courseId || (assessment as any)?.courseId || '',
         course: examContext?.courseTitle || '',
         assessmentId: examContext?.assessmentId || assessment?.id || 'unknown',
         assessmentTitle: examContext?.examTitle || assessment?.title || 'Unknown Assessment',

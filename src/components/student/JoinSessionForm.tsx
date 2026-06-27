@@ -65,15 +65,15 @@ export const JoinSessionForm = ({ compact, onNavigate }: JoinSessionFormProps) =
       }
 
       try {
-        const prof = JSON.parse(localStorage.getItem('userProfile') || '{}');
         const u = JSON.parse(localStorage.getItem('user') || '{}');
         await syncStudentProfileToFirestore(
           {
-            name: prof.name || u.name || '',
-            studentNumber: prof.studentNumber || '',
-            email: prof.email || u.email || '',
-            course: prof.course || '',
-            year: prof.year || '',
+            name: u.name || '',
+            studentNumber: u.studentNumber || '',
+            email: u.email || '',
+            course: u.course || '',
+            year: u.year || '',
+            section: u.section || '',
           },
           studentId
         );

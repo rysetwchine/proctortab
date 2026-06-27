@@ -185,6 +185,21 @@ export function EditAssessmentAdvancedDialog({ open, onOpenChange, assessment, o
             </p>
             
             <div className="space-y-2 pt-1">
+              <button
+                type="button"
+                onClick={() => {
+                  const allEnabled = overrideCopy && overrideTab && overrideFullscreen && overrideScreenshot && overrideAlarm;
+                  setOverrideCopy(!allEnabled);
+                  setOverrideTab(!allEnabled);
+                  setOverrideFullscreen(!allEnabled);
+                  setOverrideScreenshot(!allEnabled);
+                  setOverrideAlarm(!allEnabled);
+                }}
+                className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-indigo-500/10 border border-indigo-500/20 rounded-lg text-indigo-400 text-xs font-semibold hover:bg-indigo-500/20 transition-colors mb-2"
+              >
+                {overrideCopy && overrideTab && overrideFullscreen && overrideScreenshot && overrideAlarm ? 'Deselect All Detectors' : 'Select All Detectors'}
+              </button>
+
               <div className="flex items-center justify-between py-1.5 border-b border-white/[0.04]">
                 <Label htmlFor="ed-copy" className="text-xs text-slate-300 font-normal">Copy / paste protection</Label>
                 <Switch id="ed-copy" checked={overrideCopy} onCheckedChange={setOverrideCopy} />

@@ -8,6 +8,7 @@ export type StudentProfileFields = {
   email?: string;
   course?: string;
   year?: string;
+  section?: string;
 };
 
 /**

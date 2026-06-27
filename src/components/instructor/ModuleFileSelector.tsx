@@ -97,7 +97,7 @@ export function ModuleFileSelector({
             <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
           </Button>
         </PopoverTrigger>
-        <PopoverContent className="w-full p-0 max-h-[400px] overflow-y-auto bg-[#0b0e27] border-white/[0.07]" align="start">
+        <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0 max-h-[400px] overflow-y-auto bg-[#0b0e27] border-white/[0.07]" align="start">
           <Command className="bg-[#0b0e27]">
             <CommandEmpty className="text-slate-400 py-6">No module files found.</CommandEmpty>
             <CommandList className="max-h-[350px] overflow-y-auto">

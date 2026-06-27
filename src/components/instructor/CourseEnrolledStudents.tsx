@@ -166,9 +166,9 @@ export const CourseEnrolledStudents = ({ course, onBack }: CourseEnrolledStudent
 
                         <div>
                           <span className="text-slate-400 text-xs uppercase font-semibold tracking-wide">
-                            Year
+                            Year & Section
                           </span>
-                          <p className="font-medium text-white mt-1">{year}</p>
+                          <p className="font-medium text-white mt-1">{year} — {row?.section || '—'}</p>
                         </div>
 
                         <div className="sm:col-span-2">

@@ -405,9 +405,13 @@ export function StudentAttendancePanel() {
                     {userProfile.program || (userProfile.course === 'BSIT' ? 'Bachelor of Science in Information Technology' : 'Academic Program')}
                   </p>
                 </div>
-                <div className="p-4 bg-slate-900/30 border border-slate-800/60 rounded-2xl sm:col-span-2">
+                <div className="p-4 bg-slate-900/30 border border-slate-800/60 rounded-2xl">
                   <p className="text-xs text-slate-500 uppercase tracking-wider">Academic Year</p>
                   <p className="text-base font-bold text-white mt-1">{userProfile.year || 'N/A'}</p>
+                </div>
+                <div className="p-4 bg-slate-900/30 border border-slate-800/60 rounded-2xl">
+                  <p className="text-xs text-slate-500 uppercase tracking-wider">Section</p>
+                  <p className="text-base font-bold text-white mt-1">{userProfile.section || user?.section || 'N/A'}</p>
                 </div>
               </div>
 

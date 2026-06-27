@@ -51,6 +51,7 @@ interface ExamInterfaceProps {
     courseTitle?: string;
     examTitle?: string;
     assessmentId?: string;
+    courseId?: string;
   };
 }
 

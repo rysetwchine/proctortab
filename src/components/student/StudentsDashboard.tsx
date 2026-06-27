@@ -95,6 +95,14 @@ export const StudentDashboard = ({ onStartExam, onNavigate }: StudentDashboardPr
   const [selectedCameraId, setSelectedCameraId] = useState('');
   const [scannerInstance, setScannerInstance] = useState<Html5Qrcode | null>(null);
 
+  const formatJoinCodeInput = (val: string) => {
+    const clean = val.replace(/[-\s]/g, '').toUpperCase().slice(0, 6);
+    if (clean.length > 3) {
+      return `${clean.slice(0, 3)}-${clean.slice(3)}`;
+    }
+    return clean;
+  };
+
   const [testingEvent, setTestingEvent] = useState<string | null>(null);
   const [testLog, setTestLog] = useState<string>('');
 
@@ -168,7 +176,7 @@ export const StudentDashboard = ({ onStartExam, onNavigate }: StudentDashboardPr
         return;
       }
 
-      toast.success(`Successfully joined: ${session.title}`);
+      toast.success('Successfully Joined Academic Session.');
 
       if (session.type !== 'course') {
         localStorage.setItem(
@@ -183,15 +191,15 @@ export const StudentDashboard = ({ onStartExam, onNavigate }: StudentDashboardPr
 
       // Sync student profile information
       try {
-        const prof = JSON.parse(localStorage.getItem('userProfile') || '{}');
         const u = JSON.parse(localStorage.getItem('user') || '{}');
         await syncStudentProfileToFirestore(
           {
-            name: prof.name || u.name || '',
-            studentNumber: prof.studentNumber || '',
-            email: prof.email || u.email || '',
-            course: prof.course || '',
-            year: prof.year || '',
+            name: u.name || '',
+            studentNumber: u.studentNumber || '',
+            email: u.email || '',
+            course: u.course || '',
+            year: u.year || '',
+            section: u.section || '',
           },
           sid
         );
@@ -363,7 +371,7 @@ export const StudentDashboard = ({ onStartExam, onNavigate }: StudentDashboardPr
                     placeholder="Enter course or exam join code..."
                     className="pl-10 h-12 bg-slate-900/40 border-slate-800 text-white placeholder-slate-600 rounded-xl focus-visible:ring-indigo-500/50 text-sm tracking-wider uppercase"
                     value={joinCode}
-                    onChange={(e) => setJoinCode(e.target.value)}
+                    onChange={(e) => setJoinCode(formatJoinCodeInput(e.target.value))}
                     onKeyDown={handleKeyPress}
                     disabled={joinLoading}
                   />

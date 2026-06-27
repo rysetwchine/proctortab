@@ -127,6 +127,7 @@ const handleLogout = async () => {
             studentNumber: profileData?.studentNumber || '',
             course: profileData?.course || '',
             year: profileData?.year || '',
+            section: profileData?.section || '',
             role: (role || "student").toLowerCase(),
           };
           localStorage.setItem("user", JSON.stringify(completeUser));
@@ -156,6 +157,7 @@ const handleLogout = async () => {
                 courseTitle: courseExamLaunch.courseTitle,
                 examTitle: courseExamLaunch.assessment.title,
                 assessmentId: courseExamLaunch.assessment.id,
+                courseId: courseExamLaunch.courseId,
               }
             : undefined
         }
@@ -171,6 +173,12 @@ const handleLogout = async () => {
               payload.sessionQuestions,
               courseExamLaunch.assessment
             );
+            const sub = (courseExamLaunch.assessment.submissions || []).find(
+              (s) => String(s.studentId) === String(sid)
+            );
+            const prevAttemptCount = sub ? (sub as any).attemptCount ?? 1 : 0;
+            const nextAttemptCount = prevAttemptCount + 1;
+
             void saveCourseExamResultToFirestore({
               courseId: courseExamLaunch.courseId,
               examId: courseExamLaunch.assessment.id,
@@ -178,6 +186,7 @@ const handleLogout = async () => {
               studentName: user?.name || 'Student',
               score: graded.score,
               totalItems: graded.totalItems,
+              attemptCount: nextAttemptCount,
             }).catch((e) => console.warn('Could not save exam result to Firestore:', e));
 
             const merged = mergeAssessmentSubmission(
@@ -188,7 +197,8 @@ const handleLogout = async () => {
                 score: graded.score,
                 maxScore: graded.maxScore,
                 submittedAt: new Date().toISOString(),
-              }
+                attemptCount: nextAttemptCount,
+              } as any
             );
             updateAssessment(courseExamLaunch.courseId, courseExamLaunch.assessment.id, {
               submissions: merged,

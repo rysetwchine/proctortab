@@ -10,6 +10,7 @@ export type CourseExamResultPayload = {
   courseId: string;
   score: number;
   totalItems: number;
+  attemptCount?: number;
 };
 
 /**
@@ -26,6 +27,7 @@ export async function saveCourseExamResultToFirestore(payload: CourseExamResultP
       studentId,
       examId,
       courseId,
+      attemptCount: payload.attemptCount || 1,
       timestamp: serverTimestamp(),
     },
     { merge: true }

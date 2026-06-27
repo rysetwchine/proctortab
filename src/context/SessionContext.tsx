@@ -538,6 +538,7 @@ export const SessionProvider = ({ children }: { children: ReactNode }) => {
                           submittedAt: r?.timestamp?.toDate
                             ? r.timestamp.toDate().toISOString()
                             : r?.submittedAt || r?.completedAt,
+                          attemptCount: typeof r?.attemptCount === 'number' ? r.attemptCount : 1,
                         };
                       })
                       .filter((s) => !!s.studentId);
@@ -705,15 +706,56 @@ export const SessionProvider = ({ children }: { children: ReactNode }) => {
           query(collection(db, 'courses'), where('joinCode', '==', formatJoinCode(cleanCode))),
         ];
 
-        let docSnap: any = null;
-        for (const candidate of candidates) {
-          const snap = await getDocs(candidate);
-          if (!snap.empty) {
-            docSnap = snap.docs[0];
-            break;
+        const snaps = await Promise.all(candidates.map((c) => getDocs(c)));
+        let docSnap = snaps.find((snap) => !snap.empty)?.docs[0] || null;
+        
+        if (!docSnap) {
+          // Fallback to exam_sessions lookup
+          const examCandidates = [
+            query(collection(db, 'exam_sessions'), where('code', '==', cleanCode)),
+            query(collection(db, 'exam_sessions'), where('code', '==', formatJoinCode(cleanCode))),
+          ];
+          const examSnaps = await Promise.all(examCandidates.map((c) => getDocs(c)));
+          const examDocSnap = examSnaps.find((snap) => !snap.empty)?.docs[0] || null;
+          
+          if (!examDocSnap) return null;
+
+          const examData: any = examDocSnap.data() || {};
+          const examSessionId = String(examDocSnap.id);
+
+          const cloudSession: Session = {
+            id: examSessionId,
+            title: String(examData.title || 'Exam Session'),
+            joinCode: String(examData.code || cleanCode),
+            type: 'exam',
+            status: String(examData.status || 'active') as any,
+            createdAt: examData.createdAt?.toDate ? examData.createdAt.toDate() : new Date(),
+            enrolledStudents: (examData.enrolledStudents || []).map(String),
+            modules: [],
+            assessments: [],
+            courseAssignments: [],
+            announcements: [],
+          };
+
+          // Enroll the student in exam session (cloud + local)
+          if (!cloudSession.enrolledStudents.includes(sid)) {
+            try {
+              await updateDoc(doc(db, 'exam_sessions', examSessionId), {
+                enrolledStudents: arrayUnion(sid),
+              });
+            } catch (e) {
+              console.warn('[SessionContext] Failed to persist exam enrollment:', e);
+            }
+            cloudSession.enrolledStudents = [...cloudSession.enrolledStudents, sid];
           }
+
+          setSessions((prev) => {
+            if (prev.some((s) => String(s.id) === examSessionId)) return prev;
+            return [...prev, cloudSession];
+          });
+
+          return cloudSession;
         }
-        if (!docSnap) return null;
 
         const data: any = docSnap.data() || {};
         const courseId = String(docSnap.id);

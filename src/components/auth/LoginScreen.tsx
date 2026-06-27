@@ -25,27 +25,11 @@ export const LoginScreen = ({ onLogin, onSwitchToRegister }: LoginScreenProps) =
     return 'student';
   };
 
-  const withTimeout = <T,>(promise: Promise<T>, timeoutMs: number, errorMessage: string): Promise<T> => {
-    let timeoutId: number;
-    const timeoutPromise = new Promise<never>((_, reject) => {
-      timeoutId = window.setTimeout(() => {
-        reject(new Error(errorMessage));
-      }, timeoutMs);
-    });
-    return Promise.race([promise, timeoutPromise]).finally(() => {
-      window.clearTimeout(timeoutId);
-    });
-  };
-
   const getEmailByStudentNumber = async (studentNumber: string): Promise<string | null> => {
     try {
       const usersRef = collection(db, 'users');
       const q = query(usersRef, where('studentNumber', '==', studentNumber));
-      const querySnapshot = await withTimeout(
-        getDocs(q),
-        4000,
-        'Connection timeout looking up student number. Please try again.'
-      );
+      const querySnapshot = await getDocs(q);
 
       if (!querySnapshot.empty) {
         return querySnapshot.docs[0].data().email;
@@ -75,19 +59,11 @@ export const LoginScreen = ({ onLogin, onSwitchToRegister }: LoginScreenProps) =
         emailToUse = lookedUpEmail;
       }
 
-      const userCredential = await withTimeout(
-        signInWithEmailAndPassword(auth, emailToUse, password),
-        6000,
-        'Connection timeout signing in. Please try again.'
-      );
+      const userCredential = await signInWithEmailAndPassword(auth, emailToUse, password);
 
       const uid = userCredential.user.uid;
 
-      let userDoc = await withTimeout(
-        getDoc(doc(db, "users", uid)),
-        4000,
-        'Connection timeout retrieving user profile. Please try again.'
-      );
+      let userDoc = await getDoc(doc(db, "users", uid));
       let userData = userDoc.exists() ? userDoc.data() : null;
 
       if (!userData) {
@@ -106,16 +82,8 @@ export const LoginScreen = ({ onLogin, onSwitchToRegister }: LoginScreenProps) =
         };
 
         try {
-          await withTimeout(
-            setDoc(doc(db, "users", uid), newProfile),
-            4000,
-            'Connection timeout saving user profile. Please try again.'
-          );
-          userDoc = await withTimeout(
-            getDoc(doc(db, "users", uid)),
-            4000,
-            'Connection timeout retrieving user profile. Please try again.'
-          );
+          await setDoc(doc(db, "users", uid), newProfile);
+          userDoc = await getDoc(doc(db, "users", uid));
           userData = userDoc.exists() ? userDoc.data() : newProfile;
         } catch (writeErr) {
           console.error("Failed to self-heal/create user profile:", writeErr);

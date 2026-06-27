@@ -839,9 +839,8 @@ export function CreateCourseAssessmentDialog({
                       type="datetime-local"
                       value={dueDate}
                       onChange={(e) => setDueDate(e.target.value)}
-                      className="h-12 text-xs border-white/[0.07] rounded-lg text-slate-200 focus-visible:ring-violet-500 w-full px-4 pr-10"
+                      className="h-12 text-xs border-white/[0.07] rounded-lg text-slate-200 focus-visible:ring-violet-500 w-full px-4"
                     />
-                    <Calendar className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 pointer-events-none" />
                   </div>
                 </div>
               </div>

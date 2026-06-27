@@ -1,14 +1,9 @@
-# Step Progress
+# TODO_STEP_PROGRESS (Assessment System UI + Real-time + Anti-cheat)
 
-## Phase 1
-- [x] Step A: Update Live Session Monitoring table columns + better Violation/Threshold/Action rendering
-- [x] Step B/C: Attendance dashboard adds row click → AttendanceEventDetailsDialog + responsive layout preserved
-- [x] Step C (partial): AttendanceEventDetailsDialog dark theme polish with violet/blue accents
-- [x] Step D: Wrap Attendance & Grades dashboards with MotionBackground (match Grades dashboard style)
-
-- [x] Step E (debug): Add DEV realtime debug banner to CourseAttendanceTab to verify subscription/courseId mismatch
-
-## Phase 2
-- [ ] Locate Grade Dashboard component/file responsible for subject selection + assessments + score saving
-- [ ] Implement subject list + assessment view with teacher score editor + auto-calculated totals/percent/final grade
+- [x] Located key files and verified: due date icon alignment, Select All detectors, join session confirmation + auto-dash formatting, anti-cheat Task View/virtual desktop logic, and instructor live monitoring table sources.
+- [ ] Implement Firestore-backed attempts tracking (replace localStorage attempt counting) so student allowed attempts exactly match instructor settings.
+- [ ] Ensure attempts used/max are updated via onSnapshot in both student UI and instructor dashboard.
+- [ ] Ensure all deductions/violations/time/status changes write to Firestore with consistent document IDs (avoid duplicates) and reflect immediately.
+- [ ] Fix any remaining UI container spacing/text overlap issues found after the state-sync changes.
+- [ ] Build/test and verify on Vercel deployment.
 

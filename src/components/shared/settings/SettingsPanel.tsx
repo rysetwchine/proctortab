@@ -31,6 +31,7 @@ export const SettingsPanel = () => {
     email: '',
     course: '',
     year: '',
+    section: '',
     program: '',
   });
   const [loading, setLoading] = useState(true);
@@ -55,6 +56,7 @@ export const SettingsPanel = () => {
               email: data.email || storedUser.email || '',
               course: data.course || storedUser.course || '',
               year: data.year || storedUser.year || '',
+              section: data.section || storedUser.section || '',
               program: data.program || '',
             });
           } else {
@@ -64,6 +66,7 @@ export const SettingsPanel = () => {
               email: storedUser.email || '',
               course: storedUser.course || '',
               year: storedUser.year || '',
+              section: storedUser.section || '',
               program: '',
             });
           }
@@ -78,8 +81,8 @@ export const SettingsPanel = () => {
   }, [isStudent]);
 
   const handleSaveProfile = async () => {
-    if (!profile.name.trim() || !profile.studentNumber.trim() || !profile.email.trim() || !profile.course.trim() || !profile.year.trim()) {
-      toast.error("Please fill in all required fields (Name, Student Number, Email, Course, Year).");
+    if (!profile.name.trim() || !profile.studentNumber.trim() || !profile.email.trim() || !profile.course.trim() || !profile.year.trim() || !profile.section.trim()) {
+      toast.error("Please fill in all required fields (Name, Student Number, Email, Course, Year, Section).");
       return;
     }
 
@@ -94,6 +97,7 @@ export const SettingsPanel = () => {
         email: profile.email,
         course: profile.course,
         year: profile.year,
+        section: profile.section,
       }, directoryId);
 
       // 2. Save program field (since syncStudentProfileToFirestore doesn't take program)
@@ -113,6 +117,7 @@ export const SettingsPanel = () => {
         email: profile.email,
         course: profile.course,
         year: profile.year,
+        section: profile.section,
         program: profile.program,
       };
       localStorage.setItem("user", JSON.stringify(updatedUser));
@@ -305,6 +310,21 @@ export const SettingsPanel = () => {
                     </div>
                   </div>
 
+                  {/* Section */}
+                  <div>
+                    <label className="text-xs font-semibold text-slate-400 flex items-center gap-2 mb-1.5 uppercase tracking-wider">
+                      <GraduationCap className="w-3.5 h-3.5 text-cyan-400" />
+                      Section *
+                    </label>
+                    <input
+                      type="text"
+                      className="w-full px-4 py-2.5 bg-slate-950/60 border border-slate-800 rounded-lg text-white placeholder:text-slate-550 focus:outline-none focus:border-cyan-500/55 transition-all text-sm"
+                      placeholder="e.g. Section A"
+                      value={profile.section}
+                      onChange={(e) => setProfile({ ...profile, section: e.target.value })}
+                    />
+                  </div>
+
                   {/* Program */}
                   <div>
                     <label className="text-xs font-semibold text-slate-400 flex items-center gap-2 mb-1.5 uppercase tracking-wider">
@@ -354,6 +374,7 @@ export const SettingsPanel = () => {
                     email: profile.email,
                     course: profile.course,
                     year: profile.year,
+                    section: profile.section,
                     program: profile.program || undefined,
                   }}
                 />

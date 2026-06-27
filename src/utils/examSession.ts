@@ -113,7 +113,8 @@ export function canStartAttempt(
   studentId: string
 ): { allowed: boolean; used: number; max: number } {
   const max = Math.max(assessment.maxAttempts ?? 1, 1);
-  const used = getAttemptCount(courseId, assessment.id, studentId);
+  const sub = (assessment.submissions || []).find((s) => String(s.studentId) === String(studentId));
+  const used = sub ? (sub as any).attemptCount ?? 1 : 0;
   return { allowed: used < max, used, max };
 }
 

@@ -12,7 +12,7 @@ import { getCurrentOwnerUid } from '@/utils/storedUser';
 import { 
   Users, FolderOpen, ClipboardList, Monitor, Cpu, 
   Activity, Book, Bell, Ban, MousePointerClick, 
-  AppWindow, Maximize 
+  AppWindow, Maximize, Trash2
 } from 'lucide-react';
 import { TabMonitoringDashboard } from './TabMonitoringDashboard';
 import { type ArduinoTabStatus } from '@/hooks/useArduinoSerial';
@@ -50,6 +50,10 @@ export const InstructorDashboard = ({ onNavigate }: InstructorDashboardProps) =>
       ),
     [sessions, myUid]
   );
+  const myCourseIds = useMemo(
+    () => myCourses.map(c => String(c.id)),
+    [myCourses]
+  );
 
   const localCoursesCount = myCourses.length;
   const upcomingCourseExamsCount = useMemo(() => {
@@ -62,7 +66,6 @@ export const InstructorDashboard = ({ onNavigate }: InstructorDashboardProps) =>
     return n;
   }, [myCourses]);
 
-  const [studentsCount, setStudentsCount] = useState(0);
   const [liveJoinSessionsCount, setLiveJoinSessionsCount] = useState(0);
   const [tabLogs, setTabLogs] = useState<any[]>([]);
   const [mouseViolationLogs, setMouseViolationLogs] = useState<any[]>([]);
@@ -75,6 +78,36 @@ export const InstructorDashboard = ({ onNavigate }: InstructorDashboardProps) =>
   const [showTabMonitoring, setShowTabMonitoring] = useState(false);
   const [selectedCourseFilter, setSelectedCourseFilter] = useState<string>('All Section');
   const [coursePickerOpen, setCoursePickerOpen] = useState(false);
+  const [selectedSectionFilter, setSelectedSectionFilter] = useState<string>('');
+  const [sectionPickerOpen, setSectionPickerOpen] = useState(false);
+  const [enrolledProfiles, setEnrolledProfiles] = useState<any[]>([]);
+
+  const myEnrolledStudentIds = useMemo(() => {
+    const ids = new Set<string>();
+    myCourses.forEach((c) => {
+      if (c.enrolledStudents) {
+        c.enrolledStudents.forEach((sid) => ids.add(String(sid)));
+      }
+    });
+    return Array.from(ids);
+  }, [myCourses]);
+
+  const availableSections = useMemo(() => {
+    const secs = new Set<string>();
+    enrolledProfiles.forEach((p) => {
+      if (p.section && String(p.section).trim() !== '') {
+        secs.add(String(p.section).trim());
+      }
+    });
+    return Array.from(secs).sort();
+  }, [enrolledProfiles]);
+
+  useEffect(() => {
+    if (availableSections.length > 0 && (!selectedSectionFilter || !availableSections.includes(selectedSectionFilter))) {
+      setSelectedSectionFilter(availableSections[0]);
+    }
+  }, [availableSections, selectedSectionFilter]);
+
 
   const logs = useMemo(() => [...tabLogs, ...mouseViolationLogs], [tabLogs, mouseViolationLogs]);
 
@@ -113,10 +146,17 @@ export const InstructorDashboard = ({ onNavigate }: InstructorDashboardProps) =>
   }, [myCourses, logs]);
 
   const filteredLogs = useMemo(() => {
-    const selected = String(selectedCourseFilter || '').trim();
-    if (!selected || selected === 'All Section') return logs || [];
-    return (logs || []).filter((l: any) => String(l?.course || '').trim() === selected);
-  }, [logs, selectedCourseFilter]);
+    let result = logs || [];
+    const selectedCourse = String(selectedCourseFilter || '').trim();
+    if (selectedCourse && selectedCourse !== 'All Section' && selectedCourse !== 'All Courses') {
+      result = result.filter((l: any) => String(l?.course || '').trim() === selectedCourse);
+    }
+    const selectedSection = String(selectedSectionFilter || '').trim();
+    if (selectedSection && selectedSection !== 'All Sections') {
+      result = result.filter((l: any) => String(l?.studentSection || l?.section || '').trim() === selectedSection);
+    }
+    return result;
+  }, [logs, selectedCourseFilter, selectedSectionFilter]);
 
   const uniqueStudents = useMemo(
     () => new Set((filteredLogs || []).map((log: any) => log.userId || log.studentId)).size,
@@ -148,17 +188,26 @@ export const InstructorDashboard = ({ onNavigate }: InstructorDashboardProps) =>
   );
 
   useEffect(() => {
+    if (myCourseIds.length === 0) {
+      setTabLogs([]);
+      return;
+    }
     const unsub = onSnapshot(collection(db, "tab_logs"), (snapshot) => {
       const data = snapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data()
       }));
-      setTabLogs(data);
+      const filtered = data.filter((log: any) => myCourseIds.includes(String(log.courseId)));
+      setTabLogs(filtered);
     });
     return () => unsub();
-  }, []);
+  }, [myCourseIds]);
 
   useEffect(() => {
+    if (myCourseIds.length === 0) {
+      setMouseViolationLogs([]);
+      return;
+    }
     const q = query(collection(db, "assessment_violations"), orderBy("timestamp", "desc"));
     const unsub = onSnapshot(q, (snapshot) => {
       const rows = snapshot.docs
@@ -170,11 +219,12 @@ export const InstructorDashboard = ({ onNavigate }: InstructorDashboardProps) =>
           studentName: row.studentName || row.userId,
           assessmentTitle: row.assessmentTitle || row.examId || row.quizId || "Unknown",
           violation: "Mouse Tracking",
-        }));
+        }))
+        .filter((row: any) => myCourseIds.includes(String(row.courseId)));
       setMouseViolationLogs(rows);
     });
     return () => unsub();
-  }, []);
+  }, [myCourseIds]);
 
   useEffect(() => {
     if (!arduino.isConnected) return;
@@ -216,6 +266,7 @@ export const InstructorDashboard = ({ onNavigate }: InstructorDashboardProps) =>
         const id = change.doc.id;
         if (sentIds.has(id)) continue;
         const docData = change.doc.data() as any;
+        if (!myCourseIds.includes(String(docData.courseId))) continue;
         const status = statusFromExistingLog(docData);
         if (!status) continue;
         sentIds.add(id);
@@ -226,12 +277,20 @@ export const InstructorDashboard = ({ onNavigate }: InstructorDashboardProps) =>
   }, [arduino.isConnected]);
 
   useEffect(() => {
-    const unsub = onSnapshot(collection(db, "users"), (snapshot) => {
-      const students = snapshot.docs.filter((d) => d.data().role === "student");
-      setStudentsCount(students.length);
+    if (myEnrolledStudentIds.length === 0) {
+      setEnrolledProfiles([]);
+      return;
+    }
+    const unsub = onSnapshot(collection(db, "student_profiles"), (snapshot) => {
+      const data = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+      const filtered = data.filter((p: any) => myEnrolledStudentIds.includes(String(p.directoryId)));
+      setEnrolledProfiles(filtered);
     });
     return () => unsub();
-  }, []);
+  }, [myEnrolledStudentIds]);
 
   const goCourses = () => onNavigate("courses");
   const goReportsExaminations = () => {
@@ -296,18 +355,72 @@ export const InstructorDashboard = ({ onNavigate }: InstructorDashboardProps) =>
     }
   };
 
+  const handleExportCSV = () => {
+    const listToExport = filteredLogs || [];
+    if (listToExport.length === 0) {
+      alert('No logs available to export.');
+      return;
+    }
+    const headers = ['Student Name', 'Section', 'Assessment', 'Violation Event', 'Behavior Classification', 'Deducted Time', 'Strikes', 'Auto Submitted', 'Time'];
+    const csvRows = [
+      headers.join(','),
+      ...listToExport.map(log => {
+        const classification = log.behaviorClassification || (
+          log.durationSeconds != null && log.durationSeconds > 0
+            ? log.durationSeconds <= 1
+              ? 'Accidental'
+              : log.durationSeconds <= 3
+                ? 'Suspicious'
+                : 'Intentional'
+            : 'Intentional'
+        );
+        const time = log.timestamp
+          ? new Date(log.timestamp.toDate?.() || log.timestamp).toLocaleString()
+          : 'N/A';
+        const deducted = log.deductedTime != null && log.deductedTime > 0
+          ? `-${Math.round(log.deductedTime / 60)} min`
+          : log.deductedMinutes != null && log.deductedMinutes > 0
+            ? `-${log.deductedMinutes} min`
+            : 'None';
+        return [
+          `"${(log.studentName || 'Unknown').replace(/"/g, '""')}"`,
+          `"${(log.studentSection || log.section || 'N/A').replace(/"/g, '""')}"`,
+          `"${(log.assessmentTitle || 'Unknown').replace(/"/g, '""')}"`,
+          `"${(log.violationType || 'Tab Switch').replace(/"/g, '""')}"`,
+          `"${classification.replace(/"/g, '""')}"`,
+          `"${deducted.replace(/"/g, '""')}"`,
+          `"${log.intentionalViolationCount != null ? `${log.intentionalViolationCount}/3` : '0/3'}"`,
+          `"${log.autoSubmitted ? 'Yes' : 'No'}"`,
+          `"${time.replace(/"/g, '""')}"`,
+        ].join(',');
+      })
+    ];
+    const csvContent = "data:text/csv;charset=utf-8," + csvRows.join("\n");
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", `proctoring_logs_export_${Date.now()}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   const handleDeleteAllLogs = async () => {
     const confirmDelete = window.confirm(
       "Are you sure you want to delete ALL logs? This cannot be undone."
     );
     if (!confirmDelete) return;
+
+    // Automatically export logs before deletion for backup purposes
+    handleExportCSV();
+
     try {
       const deletePromises = [
         ...(tabLogs || []).map((log) => deleteDoc(doc(db, "tab_logs", log.id))),
         ...(mouseViolationLogs || []).map((log) => deleteDoc(doc(db, "assessment_violations", log.id))),
       ];
       await Promise.all(deletePromises);
-      alert("All logs deleted successfully!");
+      alert("All logs deleted successfully and backed up to CSV!");
     } catch (error) {
       console.error("Error deleting logs:", error);
       alert("Failed to delete logs.");
@@ -371,6 +484,83 @@ export const InstructorDashboard = ({ onNavigate }: InstructorDashboardProps) =>
           </div>
         </header>
 
+        {/* ================= TOP FILTER & ACTION BAR ================= */}
+        <div className="bg-slate-900/60 backdrop-blur-md border border-slate-700/50 p-4 rounded-xl flex flex-col md:flex-row items-center justify-between gap-4">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 w-full md:w-auto">
+            {/* Section Filter (Predefined "All Sections" option removed) */}
+            <div className="flex items-center gap-2.5">
+              <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Section:</span>
+              <div className="flex flex-wrap gap-1.5">
+                {availableSections.length === 0 ? (
+                  <span className="text-xs text-slate-500 font-medium bg-slate-950/40 px-3 py-1.5 rounded-lg border border-slate-800">No student sections linked yet</span>
+                ) : (
+                  availableSections.map((sec) => (
+                    <Button
+                      key={sec}
+                      type="button"
+                      variant={selectedSectionFilter === sec ? 'default' : 'outline'}
+                      size="sm"
+                      className={selectedSectionFilter === sec ? "bg-cyan-600 text-white hover:bg-cyan-500" : "bg-slate-950/40 text-slate-350 border-slate-800 hover:bg-slate-800"}
+                      onClick={() => setSelectedSectionFilter(sec)}
+                    >
+                      {sec}
+                    </Button>
+                  ))
+                )}
+              </div>
+            </div>
+
+            {/* Course Filter Dropdown */}
+            <div className="flex items-center gap-2">
+              <Popover open={coursePickerOpen} onOpenChange={setCoursePickerOpen}>
+                <PopoverTrigger asChild>
+                  <Button type="button" variant="outline" size="sm" className="shadow-sm font-semibold bg-slate-800/80 text-slate-200 border-slate-700 hover:bg-slate-700 hover:text-white">
+                    Course: {selectedCourseFilter === 'All Section' ? 'All Courses' : selectedCourseFilter}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent align="start" className="w-72 p-3 shadow-2xl rounded-xl bg-slate-800 border-slate-700 text-white z-50">
+                  <div className="space-y-3">
+                    <p className="text-xs font-bold text-slate-400 uppercase tracking-wider px-1">Select Course</p>
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        type="button"
+                        variant={selectedCourseFilter === 'All Section' ? 'default' : 'outline'}
+                        size="sm"
+                        className={selectedCourseFilter === 'All Section' ? "bg-cyan-600 text-white hover:bg-cyan-500" : "bg-slate-900/50 text-slate-350 border-slate-650 hover:bg-slate-700"}
+                        onClick={() => { setSelectedCourseFilter('All Section'); setCoursePickerOpen(false); }}
+                      >
+                        All Courses
+                      </Button>
+                      {availableCourseTitles.map((title) => (
+                        <Button
+                          key={title}
+                          type="button"
+                          variant={selectedCourseFilter === title ? 'default' : 'outline'}
+                          size="sm"
+                          className={selectedCourseFilter === title ? "bg-cyan-600 text-white hover:bg-cyan-500" : "bg-slate-900/50 text-slate-350 border-slate-650 hover:bg-slate-700"}
+                          onClick={() => { setSelectedCourseFilter(title); setCoursePickerOpen(false); }}
+                        >
+                          {title}
+                        </Button>
+                      ))}
+                    </div>
+                  </div>
+                </PopoverContent>
+              </Popover>
+            </div>
+          </div>
+
+          {/* Quick Actions - Export & Delete trash bin */}
+          <div className="flex items-center gap-2">
+            <Button onClick={handleExportCSV} className="shadow-sm bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-555 hover:to-blue-555 text-white font-bold gap-2 text-xs h-9">
+              Export Logs (CSV)
+            </Button>
+            <Button variant="destructive" size="icon" onClick={handleDeleteAllLogs} className="shadow-sm bg-red-600 hover:bg-red-500 text-white h-9 w-9" title="Clear All Logs">
+              <Trash2 className="w-4 h-4" />
+            </Button>
+          </div>
+        </div>
+
         {/* Show Tab Monitoring Dashboard or Regular Dashboard */}
         {showTabMonitoring ? (
           <div className="bg-slate-900/60 backdrop-blur-md rounded-xl p-4 border border-slate-700/50">
@@ -411,7 +601,7 @@ export const InstructorDashboard = ({ onNavigate }: InstructorDashboardProps) =>
                   <Users className="w-7 h-7" />
                 </div>
                 <div>
-                  <p className="text-3xl font-bold text-white leading-none mb-1">{studentsCount}</p>
+                  <p className="text-3xl font-bold text-white leading-none mb-1">{myEnrolledStudentIds.length}</p>
                   <p className="text-sm text-slate-400 font-medium">Total Students</p>
                   <span className="text-cyan-400 text-xs font-semibold mt-1 inline-block group-hover:underline">View All</span>
                 </div>
@@ -564,59 +754,6 @@ export const InstructorDashboard = ({ onNavigate }: InstructorDashboardProps) =>
                       ))}
                   </tbody>
                 </table>
-              </div>
-
-              {/* Footer / Filters */}
-              <div className="bg-slate-900/80 border-t border-slate-700/50 p-4 flex flex-col sm:flex-row items-center justify-between gap-4">
-                <div className="flex items-center gap-3">
-                  <Popover open={coursePickerOpen} onOpenChange={setCoursePickerOpen}>
-                    <PopoverTrigger asChild>
-                      <Button type="button" variant="outline" className="shadow-sm font-semibold bg-slate-800/80 text-slate-200 border-slate-600 hover:bg-slate-700 hover:text-white">
-                        Filter by Section
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent align="start" className="w-72 p-3 shadow-2xl rounded-xl bg-slate-800 border-slate-700 text-white">
-                      <div className="space-y-3">
-                        <p className="text-xs font-bold text-slate-400 uppercase tracking-wider px-1">Select Section</p>
-                        <div className="flex flex-wrap gap-2">
-                          <Button
-                            type="button"
-                            variant={selectedCourseFilter === 'All Section' ? 'default' : 'outline'}
-                            size="sm"
-                            className={selectedCourseFilter === 'All Section' ? "bg-cyan-600 text-white hover:bg-cyan-500" : "bg-slate-900/50 text-slate-300 border-slate-600 hover:bg-slate-700"}
-                            onClick={() => { setSelectedCourseFilter('All Section'); setCoursePickerOpen(false); }}
-                          >
-                            All Section
-                          </Button>
-                          {availableCourseTitles.length === 0 ? (
-                            <span className="text-xs text-slate-500 px-1 py-1">No courses found.</span>
-                          ) : (
-                            availableCourseTitles.map((title) => (
-                              <Button
-                                key={title}
-                                type="button"
-                                variant={selectedCourseFilter === title ? 'default' : 'outline'}
-                                size="sm"
-                                className={selectedCourseFilter === title ? "bg-cyan-600 text-white hover:bg-cyan-500" : "bg-slate-900/50 text-slate-300 border-slate-600 hover:bg-slate-700"}
-                                onClick={() => { setSelectedCourseFilter(title); setCoursePickerOpen(false); }}
-                              >
-                                {title}
-                              </Button>
-                            ))
-                          )}
-                        </div>
-                      </div>
-                    </PopoverContent>
-                  </Popover>
-
-                  <Badge variant="secondary" className="px-3 py-1 text-sm bg-slate-800/80 border border-slate-600 text-cyan-400 shadow-sm">
-                    {selectedCourseFilter}
-                  </Badge>
-                </div>
-
-                <Button variant="destructive" onClick={handleDeleteAllLogs} className="shadow-sm bg-red-600 hover:bg-red-500 text-white font-bold">
-                  Clear All Logs
-                </Button>
               </div>
               
             </section>
