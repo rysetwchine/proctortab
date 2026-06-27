@@ -66,6 +66,7 @@ export const ExamInterface = ({ onFinish, examContext, assessment }: ExamInterfa
   const [saveStatus, setSaveStatus] = useState<'saving' | 'saved'>('saved');
   const [showDesktopWarning, setShowDesktopWarning] = useState(false);
   const [desktopWarningCount, setDesktopWarningCount] = useState(0);
+  const [showScreenshotWarning, setShowScreenshotWarning] = useState(false);
 
   // Dynamic watermark state and triggers
   const [isWatermarkProminent, setIsWatermarkProminent] = useState(false);
@@ -275,7 +276,11 @@ export const ExamInterface = ({ onFinish, examContext, assessment }: ExamInterfa
     },
     onWarning: (title, message, penaltySeconds) => {
       console.log(`[ExamInterface] onWarning triggered: ${title}. Message: "${message}". Penalty: ${penaltySeconds}s`);
-      openWarning(title, message);
+      if (title.toLowerCase().includes('screenshot')) {
+        setShowScreenshotWarning(true);
+      } else {
+        openWarning(title, message);
+      }
       if (penaltySeconds > 0) {
         console.log(`[ExamInterface] Enforcing time deduction of ${penaltySeconds} seconds.`);
         deduct(penaltySeconds);
@@ -536,15 +541,20 @@ export const ExamInterface = ({ onFinish, examContext, assessment }: ExamInterfa
     const handleKeyDown = (e: KeyboardEvent) => {
       const isPrintScreen = e.key === 'PrintScreen' || e.code === 'PrintScreen';
       const isSnipping = (e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 's';
+      const isMacScreenshot = (e.ctrlKey || e.metaKey) && e.shiftKey && ['3', '4', '5'].includes(e.key);
 
-      if (isPrintScreen) {
+      if (isPrintScreen || isSnipping || isMacScreenshot) {
         e.preventDefault();
-        handleScreenshotAttempt('PrintScreen key pressed (keydown).');
-      }
+        // Instantly cover the screen to prevent question contents from being visible in the screenshot
+        setShowScreenshotWarning(true);
 
-      if (isSnipping) {
-        e.preventDefault();
-        handleScreenshotAttempt('Snipping Tool keyboard shortcut activated (Cmd/Ctrl + Shift + S).');
+        let details = 'PrintScreen key pressed (keydown).';
+        if (isSnipping) {
+          details = 'Snipping Tool keyboard shortcut activated (Cmd/Ctrl + Shift + S).';
+        } else if (isMacScreenshot) {
+          details = `macOS Screenshot shortcut activated (Cmd/Ctrl + Shift + ${e.key}).`;
+        }
+        handleScreenshotAttempt(details);
       }
     };
 
@@ -552,7 +562,6 @@ export const ExamInterface = ({ onFinish, examContext, assessment }: ExamInterfa
       const isPrintScreen = e.key === 'PrintScreen' || e.code === 'PrintScreen';
       if (isPrintScreen) {
         e.preventDefault();
-        handleScreenshotAttempt('PrintScreen key released (keyup).');
       }
     };
 
@@ -562,7 +571,7 @@ export const ExamInterface = ({ onFinish, examContext, assessment }: ExamInterfa
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [screenshotEnabled, studentName, studentNumber, registerEvent]);
+  }, [screenshotEnabled, studentName, studentNumber, registerEvent, triggerWatermarkProminent, setShowScreenshotWarning]);
 
   // Fullscreen constraint handler
   useEffect(() => {
@@ -985,6 +994,77 @@ export const ExamInterface = ({ onFinish, examContext, assessment }: ExamInterfa
           }
         }}
       />
+
+      {/* ═══ SCREENSHOT RESTRICTION WARNING OVERLAY ═══ */}
+      {showScreenshotWarning && (
+        <div
+          className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
+          style={{ background: 'rgba(0,0,0,0.95)', backdropFilter: 'blur(20px)' }}
+        >
+          <div
+            className="relative w-full max-w-lg rounded-3xl overflow-hidden shadow-[0_0_80px_rgba(239,68,68,0.5)] border border-red-500/50 animate-in zoom-in-90 duration-200"
+            style={{ background: 'linear-gradient(135deg, rgba(15,0,0,0.98) 0%, rgba(30,3,3,0.97) 100%)' }}
+          >
+            {/* Red shimmer top */}
+            <div className="h-1 w-full bg-gradient-to-r from-red-700 via-rose-500 to-red-700" />
+
+            <div className="p-7 space-y-5 select-none">
+              {/* Icon + heading */}
+              <div className="flex items-start gap-4">
+                <div className="flex-shrink-0 w-14 h-14 rounded-2xl bg-red-500/15 border border-red-500/35 flex items-center justify-center shadow-[0_0_20px_rgba(239,68,68,0.3)]">
+                  <ShieldAlert className="w-7 h-7 text-red-400" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-red-500/80 mb-1">ProctorTab Security Alert</p>
+                  <h2 className="text-xl font-black text-white leading-tight">Screenshot Attempt Blocked</h2>
+                  <p className="text-xs text-red-400/80 mt-1 font-semibold">Violation Detected</p>
+                </div>
+                <button
+                  onClick={() => {
+                    setShowScreenshotWarning(false);
+                    void clearRtdbAlert();
+                  }}
+                  className="flex-shrink-0 w-8 h-8 rounded-lg bg-slate-800/60 border border-slate-700/50 flex items-center justify-center text-slate-400 hover:text-white hover:bg-slate-700/60 transition-all"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Alert message */}
+              <div className="rounded-2xl border border-red-500/25 bg-red-500/5 p-4 space-y-2">
+                <p className="text-sm text-slate-200 leading-relaxed font-medium">
+                  Screenshots are strictly <span className="text-red-400">restricted</span> during this assessment.
+                </p>
+                <p className="text-xs text-slate-350 leading-relaxed">
+                  Your screen has been temporarily locked to protect exam content, and a time deduction has been applied:
+                </p>
+                <p className="text-sm font-bold text-red-400 animate-pulse">
+                  ⏱️ {isQuiz ? '5 minutes' : '10 minutes'} deducted from your remaining time.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-3 text-xs text-slate-400 bg-slate-950/40 border border-slate-800/50 rounded-xl p-3">
+                <AlertTriangle className="w-4 h-4 text-amber-400 flex-shrink-0" />
+                <span>
+                  Any attempt to capture, record, or distribute assessment content violates academic integrity rules and is reported directly to the instructor.
+                </span>
+              </div>
+
+              {/* Dismiss button */}
+              <button
+                onClick={() => {
+                  setShowScreenshotWarning(false);
+                  void clearRtdbAlert();
+                }}
+                className="w-full h-11 rounded-xl font-bold text-sm text-white transition-all hover:scale-[1.02] active:scale-[0.98]"
+                style={{ background: 'linear-gradient(135deg, #dc2626 0%, #b91c1c 100%)', boxShadow: '0 0 20px rgba(220,38,38,0.25)' }}
+              >
+                I Understand — Return to Exam
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ═══ VIRTUAL DESKTOP / MULTI-DESKTOP WARNING OVERLAY ═══ */}
       {showDesktopWarning && (
