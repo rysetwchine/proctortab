@@ -134,16 +134,16 @@ export const AppSidebar = ({ activeTab, onTabChange, onLogout, isCollapsed = fal
               return;
             }
             const u = JSON.parse(localStorage.getItem("user") || "{}");
-            try {
-              await addDoc(collection(db, "tab_logs"), {
-                userId: u?.uid || "",
-                user: u?.name,
-                role: u?.role,
+            if (u?.uid) {
+              addDoc(collection(db, "tab_logs"), {
+                userId: u.uid,
+                user: u.name || "Unknown",
+                role: u.role || "student",
                 event: "logout",
                 timestamp: serverTimestamp(),
+              }).catch((e) => {
+                console.warn("Could not write logout log:", e);
               });
-            } catch (e) {
-              console.warn("Could not write logout log:", e);
             }
             localStorage.removeItem("user");
             localStorage.removeItem("userProfile");

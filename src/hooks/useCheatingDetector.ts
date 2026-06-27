@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef } from 'react';
 import { db, rtdb } from '@/firebase';
-import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, addDoc, serverTimestamp, doc, setDoc } from 'firebase/firestore';
 import { ref, set } from 'firebase/database';
 import type { CourseAssessment } from '@/context/SessionContext';
 
@@ -17,6 +17,7 @@ export type SeverityLevel = 'Informational' | 'Warning' | 'Suspicious' | 'Confir
 interface Props {
   studentId: string;
   studentName: string;
+  studentNumber: string;
   assessment?: CourseAssessment;
   examContext?: {
     courseTitle?: string;
@@ -31,6 +32,7 @@ interface Props {
 export const useCheatingDetector = ({
   studentId,
   studentName,
+  studentNumber,
   assessment,
   examContext,
   onAutoSubmit,
@@ -44,13 +46,20 @@ export const useCheatingDetector = ({
   // Intentional tab switch counter (>3 seconds = intentional)
   const [intentionalSwitchCount, setIntentionalSwitchCount] = useState(0);
   const intentionalSwitchCountRef = useRef(0);
+  const accidentalSwitchCountRef = useRef(0);
 
   const eventsRef = useRef<ProctorEvent[]>([]);
   const autoSubmittedRef = useRef(false);
   const isQuiz = (assessment?.assessmentType || 'exam') === 'quiz';
 
   const registerEvent = useCallback(
-    async (rawType: string, details: string, durationSeconds?: number, isAlreadyDeducted?: boolean) => {
+    async (
+      rawType: string,
+      details: string,
+      durationSeconds?: number,
+      isAlreadyDeducted?: boolean,
+      customDocId?: string
+    ) => {
       if (!isOnline) {
         console.log(`Proctor event ${rawType} ignored due to active network disconnection.`);
         return;
@@ -64,7 +73,14 @@ export const useCheatingDetector = ({
       let eventType = rawType;
       let behaviorClassification: 'Accidental' | 'Suspicious' | 'Intentional' = 'Intentional';
       
-      const isTabEvent = lowerRaw.includes('tab') || lowerRaw.includes('desktop') || lowerRaw.includes('leave') || lowerRaw.includes('blur') || lowerRaw.includes('external');
+      const isTabEvent =
+        lowerRaw.includes('tab') ||
+        lowerRaw.includes('desktop') ||
+        lowerRaw.includes('leave') ||
+        lowerRaw.includes('blur') ||
+        lowerRaw.includes('external') ||
+        lowerRaw.includes('task view') ||
+        lowerRaw.includes('virtual');
 
       // 1. Determine classification and score for tab loss / focus events
       if (isTabEvent) {
@@ -103,30 +119,46 @@ export const useCheatingDetector = ({
         }
       }
 
-      // If behavior is Accidental, we only display a warning notification, NO database record, NO penalty!
-      if (behaviorClassification === 'Accidental') {
-        const warningMsg = "Warning: Tab switching detected. Please remain on the assessment page.";
-        onWarning('Accidental Activity Detected', warningMsg, 0);
-        return;
-      }
-
-      // Otherwise (Suspicious or Intentional), we record the activity/violation
-      
-      // Calculate penalty:
-      // Suspicious: NO penalty.
-      // Intentional: Quiz: 5 mins (300s), Exam: 10 mins (600s)
+      // 2. Track violation occurrences and calculate penalties
       let penaltySeconds = 0;
       let dbPenaltySeconds = 0;
-      if (behaviorClassification === 'Intentional') {
+
+      const isMouseEvent = lowerRaw.includes('mouse');
+
+      if (isMouseEvent) {
+        // Mouse Exit is warning only: NO deduction
+        dbPenaltySeconds = 0;
+        penaltySeconds = 0;
+      } else if (behaviorClassification === 'Accidental') {
+        // Accidental: 1st time warning only, 2nd time deducts!
+        accidentalSwitchCountRef.current += 1;
+        if (accidentalSwitchCountRef.current === 1) {
+          const warningMsg = "Warning: Accidental tab switch detected. Please remain on the assessment page. (First Warning: No time deducted)";
+          onWarning('Accidental Tab Switch', warningMsg, 0);
+          return;
+        } else {
+          dbPenaltySeconds = isQuiz ? 300 : 600;
+          if (!isAlreadyDeducted) {
+            penaltySeconds = dbPenaltySeconds;
+          }
+        }
+      } else if (behaviorClassification === 'Suspicious') {
+        // Suspicious: always deducts
+        dbPenaltySeconds = isQuiz ? 300 : 600;
+        if (!isAlreadyDeducted) {
+          penaltySeconds = dbPenaltySeconds;
+        }
+      } else if (behaviorClassification === 'Intentional') {
+        // Intentional: always deducts
         dbPenaltySeconds = isQuiz ? 300 : 600;
         if (!isAlreadyDeducted) {
           penaltySeconds = dbPenaltySeconds;
         }
       }
 
-      // Track intentional violation counts
+      // Track intentional violation counts (only tab switches count towards the 3 strikes)
       let newCount = intentionalSwitchCountRef.current;
-      if (behaviorClassification === 'Intentional') {
+      if (behaviorClassification === 'Intentional' && isTabEvent) {
         newCount += 1;
         intentionalSwitchCountRef.current = newCount;
         setIntentionalSwitchCount(newCount);
@@ -193,10 +225,12 @@ export const useCheatingDetector = ({
       } else {
         // Specific warnings based on type
         if (isTabEvent) {
-          if (behaviorClassification === 'Suspicious') {
-            warningMsg = "Warning: Tab switching detected. Please remain on the assessment page.";
+          if (behaviorClassification === 'Accidental') {
+            warningMsg = `Warning: Repeat accidental tab switch detected (<= 1s). ${isQuiz ? '5' : '10'} minutes deducted from your remaining time.`;
+          } else if (behaviorClassification === 'Suspicious') {
+            warningMsg = `Warning: Suspicious tab switch detected (1-3s). ${isQuiz ? '5' : '10'} minutes deducted from your remaining time.`;
           } else {
-            warningMsg = `Warning: Tab switching detected. Please remain on the assessment page. ${isQuiz ? '5' : '10'} minutes deducted.`;
+            warningMsg = `Warning: Intentional tab switch detected (> 3s). ${isQuiz ? '5' : '10'} minutes deducted from your remaining time.`;
           }
         } else if (lowerRaw.includes('copy') || lowerRaw.includes('paste') || lowerRaw.includes('clipboard')) {
           warningMsg = "Warning: Copy-paste attempt detected. This activity has been recorded.";
@@ -205,76 +239,99 @@ export const useCheatingDetector = ({
         } else if (lowerRaw.includes('fullscreen')) {
           warningMsg = "Warning: Full-screen mode exited. Please return immediately.";
         } else if (lowerRaw.includes('mouse')) {
-          warningMsg = "Warning: Unusual mouse activity detected. This activity has been recorded.";
+          if (lowerRaw.includes('boundary') || lowerRaw.includes('exit')) {
+            warningMsg = "Warning: Cursor exited the exam window. Please keep your mouse inside the assessment workspace.";
+          } else {
+            warningMsg = "Warning: Unusual mouse activity detected. This activity has been recorded.";
+          }
         } else {
           warningMsg = "Warning: Cheating attempt detected. Please remain in the assessment environment.";
         }
       }
 
       // Write logs in real-time
-      try {
-        const payload = {
-          studentId,
-          studentName,
-          course: examContext?.courseTitle || '',
-          assessmentId: examContext?.assessmentId || assessment?.id || 'unknown',
-          assessmentTitle: examContext?.examTitle || assessment?.title || 'Unknown Assessment',
-          timestamp: new Date(),
-          violationType: eventType,
-          evidence: details,
-          severityLevel: newSeverity,
-          status: legacyStatus,
-          autoSubmitted: autoSubmittedFlag,
-          durationSeconds: durationSeconds ?? 0,
-          behaviorClassification,
-          warningMessage: warningMsg,
-          deductedTime: dbPenaltySeconds,
-          violationCount: updatedEvents.length,
-          intentionalViolationCount: newCount,
-          supportingEvents: updatedEvents.map(e => ({
-            type: e.type,
-            details: e.details,
-            timestamp: e.timestamp,
-            score: e.score,
-          })),
-        };
+      const payload = {
+        studentId,
+        studentName,
+        studentNumber,
+        course: examContext?.courseTitle || '',
+        assessmentId: examContext?.assessmentId || assessment?.id || 'unknown',
+        assessmentTitle: examContext?.examTitle || assessment?.title || 'Unknown Assessment',
+        assessmentType: assessment?.assessmentType || 'exam',
+        timestamp: new Date(),
+        violationType: eventType,
+        evidence: details,
+        severityLevel: newSeverity,
+        status: legacyStatus,
+        autoSubmitted: autoSubmittedFlag,
+        durationSeconds: durationSeconds ?? 0,
+        behaviorClassification,
+        warningMessage: warningMsg,
+        deductedTime: dbPenaltySeconds,
+        violationCount: updatedEvents.length,
+        intentionalViolationCount: newCount,
+        supportingEvents: updatedEvents.map(e => ({
+          type: e.type,
+          details: e.details,
+          timestamp: e.timestamp,
+          score: e.score,
+        })),
+      };
 
-        await addDoc(collection(db, 'tab_logs'), payload);
-        await addDoc(collection(db, 'assessment_violations'), {
+      // Perform database writes asynchronously in the background (non-blocking)
+      if (customDocId) {
+        setDoc(doc(db, 'tab_logs', customDocId), payload).catch((err) => {
+          console.warn('Could not set doc in tab_logs:', err);
+        });
+
+        setDoc(doc(db, 'assessment_violations', customDocId), {
           ...payload,
           userId: studentId,
           violationType: eventType.toLowerCase().replace(/\s+/g, '_'),
           deductedMinutes: Number((dbPenaltySeconds / 60).toFixed(2)),
+        }).catch((err) => {
+          console.warn('Could not set doc in assessment_violations:', err);
+        });
+      } else {
+        addDoc(collection(db, 'tab_logs'), payload).catch((err) => {
+          console.warn('Could not log to tab_logs:', err);
         });
 
-        // Arduino ESP32 RTDB alert
-        let rtdbEvent = '';
-        if (isTabEvent) {
-          if (newCount === 1) rtdbEvent = 'tab_switch_1';
-          else if (newCount === 2) rtdbEvent = 'tab_switch_2';
-          else rtdbEvent = 'tab_switch_3';
-        } else if (lowerRaw.includes('screenshot') || lowerRaw.includes('printscreen') || lowerRaw.includes('snip')) {
-          rtdbEvent = 'screen_shot';
-        } else if (lowerRaw.includes('mouse')) {
-          rtdbEvent = 'mouse_leave';
-        } else if (lowerRaw.includes('fullscreen')) {
-          rtdbEvent = 'full_screen_exit';
-        }
-
-        if (rtdbEvent) {
-          try {
-            await set(ref(rtdb, 'alerts/student1/event'), rtdbEvent);
-            const cleanStudentId = String(studentId).replace(/[.#$/[\]]/g, '_');
-            await set(ref(rtdb, `alerts/${cleanStudentId}/event`), rtdbEvent);
-          } catch (rtdbErr) {
-            console.warn('Could not write alert to Realtime Database:', rtdbErr);
-          }
-        }
-      } catch (err) {
-        console.warn('Could not log violation event to Firestore:', err);
+        addDoc(collection(db, 'assessment_violations'), {
+          ...payload,
+          userId: studentId,
+          violationType: eventType.toLowerCase().replace(/\s+/g, '_'),
+          deductedMinutes: Number((dbPenaltySeconds / 60).toFixed(2)),
+        }).catch((err) => {
+          console.warn('Could not log to assessment_violations:', err);
+        });
       }
 
-      // Handle actions
+      // Arduino ESP32 RTDB alert
+      let rtdbEvent = '';
+      if (isTabEvent) {
+        if (newCount === 1) rtdbEvent = 'tab_switch_1';
+        else if (newCount === 2) rtdbEvent = 'tab_switch_2';
+        else rtdbEvent = 'tab_switch_3';
+      } else if (lowerRaw.includes('screenshot') || lowerRaw.includes('printscreen') || lowerRaw.includes('snip')) {
+        rtdbEvent = 'screen_shot';
+      } else if (lowerRaw.includes('mouse')) {
+        rtdbEvent = 'mouse_leave';
+      } else if (lowerRaw.includes('fullscreen')) {
+        rtdbEvent = 'full_screen_exit';
+      }
+
+      if (rtdbEvent) {
+        const cleanStudentId = String(studentId).replace(/[.#$/[\]]/g, '_');
+        set(ref(rtdb, 'alerts/student1/event'), rtdbEvent).catch((rtdbErr) => {
+          console.warn('Could not write alert to Realtime Database:', rtdbErr);
+        });
+        set(ref(rtdb, `alerts/${cleanStudentId}/event`), rtdbEvent).catch((rtdbErr) => {
+          console.warn('Could not write alert to Realtime Database:', rtdbErr);
+        });
+      }
+
+      // Handle actions IMMEDIATELY
       if (autoSubmittedFlag) {
         autoSubmittedRef.current = true;
         onWarning('Assessment Terminated', warningMsg, penaltySeconds);

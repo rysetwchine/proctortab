@@ -8,7 +8,17 @@ import { isValidStudentNumber } from '@/utils/generateStudentNumber';
 
 interface RegisterScreenProps {
   onSwitchToLogin: () => void;
-  onRegisterSuccess?: (uid: string, name: string, role: string) => void;
+  onRegisterSuccess?: (
+    uid: string,
+    name: string,
+    role: string,
+    profileData: {
+      email: string;
+      studentNumber: string;
+      course: string;
+      year: string;
+    }
+  ) => void;
 }
 
 type RegisterRole = 'student' | 'professor';
@@ -62,8 +72,16 @@ export const RegisterScreen = ({ onSwitchToLogin, onRegisterSuccess }: RegisterS
         setError('Course is required');
         return false;
       }
+      if (formData.course !== 'BSIT') {
+        setError('Only BSIT course is allowed to register');
+        return false;
+      }
       if (!formData.year.trim()) {
         setError('Year is required');
+        return false;
+      }
+      if (formData.year !== '1st Year') {
+        setError('Only 1st Year level is allowed to register');
         return false;
       }
     }
@@ -82,6 +100,18 @@ export const RegisterScreen = ({ onSwitchToLogin, onRegisterSuccess }: RegisterS
     return true;
   };
 
+  const withTimeout = <T,>(promise: Promise<T>, timeoutMs: number, errorMessage: string): Promise<T> => {
+    let timeoutId: number;
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timeoutId = window.setTimeout(() => {
+        reject(new Error(errorMessage));
+      }, timeoutMs);
+    });
+    return Promise.race([promise, timeoutPromise]).finally(() => {
+      window.clearTimeout(timeoutId);
+    });
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -95,7 +125,11 @@ export const RegisterScreen = ({ onSwitchToLogin, onRegisterSuccess }: RegisterS
 
       if (selectedRole === 'student') {
         const usersRef = collection(db, 'users');
-        const existingSnap = await getDocs(query(usersRef, where('studentNumber', '==', studentNumber)));
+        const existingSnap = await withTimeout(
+          getDocs(query(usersRef, where('studentNumber', '==', studentNumber))),
+          4000,
+          'Connection timeout checking student number. Please try again.'
+        );
         if (!existingSnap.empty) {
           setError('Student number is already registered');
           setLoading(false);
@@ -103,29 +137,38 @@ export const RegisterScreen = ({ onSwitchToLogin, onRegisterSuccess }: RegisterS
         }
       }
 
-      const userCredential = await createUserWithEmailAndPassword(
-        auth,
-        formData.email,
-        formData.password
+      const userCredential = await withTimeout(
+        createUserWithEmailAndPassword(auth, formData.email, formData.password),
+        6000,
+        'Connection timeout creating account. Please try again.'
       );
 
       const uid = userCredential.user.uid;
 
-      await setDoc(doc(db, 'users', uid), {
-        uid,
-        name: formData.fullName,
-        email: formData.email,
-        studentNumber: selectedRole === 'student' ? studentNumber : '',
-        course: selectedRole === 'student' ? formData.course : '',
-        year: selectedRole === 'student' ? formData.year : '',
-        role: selectedRole,
-        createdAt: serverTimestamp(),
-      });
+      await withTimeout(
+        setDoc(doc(db, 'users', uid), {
+          uid,
+          name: formData.fullName,
+          email: formData.email,
+          studentNumber: selectedRole === 'student' ? studentNumber : '',
+          course: selectedRole === 'student' ? formData.course : '',
+          year: selectedRole === 'student' ? formData.year : '',
+          role: selectedRole,
+          createdAt: serverTimestamp(),
+        }),
+        4000,
+        'Connection timeout saving user profile. Please try again.'
+      );
 
       localStorage.removeItem('userProfile');
 
       if (onRegisterSuccess) {
-        onRegisterSuccess(uid, formData.fullName, selectedRole);
+        onRegisterSuccess(uid, formData.fullName, selectedRole, {
+          email: formData.email,
+          studentNumber: selectedRole === 'student' ? studentNumber : '',
+          course: selectedRole === 'student' ? formData.course : '',
+          year: selectedRole === 'student' ? formData.year : '',
+        });
       } else {
         alert('Registration successful! Please log in.');
         onSwitchToLogin();
@@ -254,9 +297,6 @@ export const RegisterScreen = ({ onSwitchToLogin, onRegisterSuccess }: RegisterS
                   >
                     <option value="">Select Year</option>
                     <option value="1st Year">1st Year</option>
-                    <option value="2nd Year">2nd Year</option>
-                    <option value="3rd Year">3rd Year</option>
-                    <option value="4th Year">4th Year</option>
                   </select>
                 </div>
               </>

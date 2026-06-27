@@ -73,16 +73,16 @@ const [user, setUser] = useState<any>(() => {
 const handleLogout = async () => {
   const user = JSON.parse(localStorage.getItem("user") || "{}");
 
-  try {
-    await addDoc(collection(db, "tab_logs"), {
-      userId: user?.uid || "",
-      user: user.name,
-      role: user.role,
+  if (user?.uid) {
+    addDoc(collection(db, "tab_logs"), {
+      userId: user.uid,
+      user: user.name || "Unknown",
+      role: user.role || "student",
       event: "logout",
       timestamp: serverTimestamp(),
+    }).catch((e) => {
+      console.warn("Could not log logout to Firestore:", e);
     });
-  } catch (e) {
-    console.warn("Could not log logout to Firestore:", e);
   }
 
   try {
@@ -91,7 +91,7 @@ const handleLogout = async () => {
     console.warn("Firebase signOut failed:", e);
   }
 
-  // CLEAR ALL CACHED USER DATA on logout to prevent old profile appearing for next user
+  // CLEAR ALL CACHED USER DATA on logout immediately
   localStorage.removeItem("user");
   localStorage.removeItem("userProfile");
   setUser(null);
@@ -116,36 +116,21 @@ const handleLogout = async () => {
     ) : (
       <RegisterScreen 
         onSwitchToLogin={() => setAuthScreen('login')}
-        onRegisterSuccess={async (uid, name, role) => {
+        onRegisterSuccess={async (uid, name, role, profileData) => {
           // Clear old cached profile data to prevent wrong user from appearing
           localStorage.removeItem('userProfile');
           
-          // Load complete user profile from Firestore to ensure all profile fields are available
-          const userDoc = await getDoc(doc(db, 'users', uid));
-          if (userDoc.exists()) {
-            const userData = userDoc.data();
-            const completeUser = {
-              uid,
-              name: userData.name || name,
-              email: userData.email || '',
-              studentNumber: userData.studentNumber || '',
-              course: userData.course || '',
-              year: userData.year || '',
-              role: (role || "student").toLowerCase(),
-            };
-            localStorage.setItem("user", JSON.stringify(completeUser));
-            setUser(completeUser);
-          } else {
-            // Fallback if document doesn't exist yet
-            const userData = {
-              uid,
-              name,
-              email: '',
-              role: (role || "student").toLowerCase(),
-            };
-            localStorage.setItem("user", JSON.stringify(userData));
-            setUser(userData);
-          }
+          const completeUser = {
+            uid,
+            name,
+            email: profileData?.email || '',
+            studentNumber: profileData?.studentNumber || '',
+            course: profileData?.course || '',
+            year: profileData?.year || '',
+            role: (role || "student").toLowerCase(),
+          };
+          localStorage.setItem("user", JSON.stringify(completeUser));
+          setUser(completeUser);
         }}
       />
     );

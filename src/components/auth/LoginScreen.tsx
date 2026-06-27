@@ -1,6 +1,6 @@
 import { signInWithEmailAndPassword, signOut } from "firebase/auth";
 import { auth, db } from "@/firebase";
-import { doc, getDoc, addDoc, collection, serverTimestamp, query, where, getDocs } from "firebase/firestore";
+import { doc, getDoc, setDoc, addDoc, collection, serverTimestamp, query, where, getDocs } from "firebase/firestore";
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -25,11 +25,27 @@ export const LoginScreen = ({ onLogin, onSwitchToRegister }: LoginScreenProps) =
     return 'student';
   };
 
+  const withTimeout = <T,>(promise: Promise<T>, timeoutMs: number, errorMessage: string): Promise<T> => {
+    let timeoutId: number;
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timeoutId = window.setTimeout(() => {
+        reject(new Error(errorMessage));
+      }, timeoutMs);
+    });
+    return Promise.race([promise, timeoutPromise]).finally(() => {
+      window.clearTimeout(timeoutId);
+    });
+  };
+
   const getEmailByStudentNumber = async (studentNumber: string): Promise<string | null> => {
     try {
       const usersRef = collection(db, 'users');
       const q = query(usersRef, where('studentNumber', '==', studentNumber));
-      const querySnapshot = await getDocs(q);
+      const querySnapshot = await withTimeout(
+        getDocs(q),
+        4000,
+        'Connection timeout looking up student number. Please try again.'
+      );
 
       if (!querySnapshot.empty) {
         return querySnapshot.docs[0].data().email;
@@ -59,22 +75,56 @@ export const LoginScreen = ({ onLogin, onSwitchToRegister }: LoginScreenProps) =
         emailToUse = lookedUpEmail;
       }
 
-      const userCredential = await signInWithEmailAndPassword(
-        auth,
-        emailToUse,
-        password
+      const userCredential = await withTimeout(
+        signInWithEmailAndPassword(auth, emailToUse, password),
+        6000,
+        'Connection timeout signing in. Please try again.'
       );
 
       const uid = userCredential.user.uid;
 
-      const userDoc = await getDoc(doc(db, "users", uid));
-      if (!userDoc.exists()) {
-        setError("User profile not found in database");
-        setLoading(false);
-        return;
+      let userDoc = await withTimeout(
+        getDoc(doc(db, "users", uid)),
+        4000,
+        'Connection timeout retrieving user profile. Please try again.'
+      );
+      let userData = userDoc.exists() ? userDoc.data() : null;
+
+      if (!userData) {
+        console.warn(`User profile not found for UID: ${uid}. Recreating default profile.`);
+        const email = userCredential.user.email || "";
+        const defaultName = email.split('@')[0] || "Student";
+        const newProfile = {
+          uid,
+          name: defaultName,
+          email: email,
+          studentNumber: isValidStudentNumber(username) ? username : '',
+          course: 'BSIT',
+          year: '1st Year',
+          role: selectedRole,
+          createdAt: serverTimestamp(),
+        };
+
+        try {
+          await withTimeout(
+            setDoc(doc(db, "users", uid), newProfile),
+            4000,
+            'Connection timeout saving user profile. Please try again.'
+          );
+          userDoc = await withTimeout(
+            getDoc(doc(db, "users", uid)),
+            4000,
+            'Connection timeout retrieving user profile. Please try again.'
+          );
+          userData = userDoc.exists() ? userDoc.data() : newProfile;
+        } catch (writeErr) {
+          console.error("Failed to self-heal/create user profile:", writeErr);
+          setError("User profile not found in database and could not be created.");
+          setLoading(false);
+          return;
+        }
       }
 
-      const userData = userDoc.data();
       const actualRole = normalizeRole(userData.role || "student");
 
       if (actualRole !== selectedRole) {
@@ -90,6 +140,25 @@ export const LoginScreen = ({ onLogin, onSwitchToRegister }: LoginScreenProps) =
         return;
       }
 
+      if (actualRole === 'student') {
+        const course = String(userData.course || '').trim().toUpperCase();
+        const year = String(userData.year || '').trim().toLowerCase();
+
+        const isBsit = course === 'BSIT';
+        const isFirstYear = year === '1st year' || year === '1st' || year === '1';
+
+        if (!isBsit || !isFirstYear) {
+          setError('Access Denied: Only 1st Year BSIT students are allowed to access the system.');
+          try {
+            await signOut(auth);
+          } catch {
+            // ignore
+          }
+          setLoading(false);
+          return;
+        }
+      }
+
       const safeUser = {
         uid: uid,
         name: userData.name || userCredential.user.displayName || userCredential.user.email,
@@ -103,12 +172,14 @@ export const LoginScreen = ({ onLogin, onSwitchToRegister }: LoginScreenProps) =
       localStorage.setItem("user", JSON.stringify(safeUser));
       localStorage.removeItem("userProfile");
 
-      await addDoc(collection(db, "tab_logs"), {
+      addDoc(collection(db, "tab_logs"), {
         userId: uid,
         user: safeUser.name,
         role: safeUser.role,
         event: "login",
         timestamp: serverTimestamp(),
+      }).catch((e) => {
+        console.warn("Could not log login to Firestore:", e);
       });
 
       console.log("LOCALSTORAGE USER:", JSON.parse(localStorage.getItem("user") || "{}"));

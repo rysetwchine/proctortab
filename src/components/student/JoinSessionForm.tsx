@@ -36,6 +36,9 @@ export const JoinSessionForm = ({ compact, onNavigate }: JoinSessionFormProps) =
 
       const cleanCode = joinCode.trim().replace(/[-\s]/g, '').toUpperCase();
 
+      // Show loading state
+      setMessage({ type: 'success', text: 'Joining session...' });
+
       const session = await joinSession(cleanCode, studentId);
 
       console.log('SESSION RESULT:', session);
@@ -47,7 +50,7 @@ export const JoinSessionForm = ({ compact, onNavigate }: JoinSessionFormProps) =
 
       setMessage({
         type: 'success',
-        text: `Session found: ${session.title}`,
+        text: 'Successfully Joined Academic Session',
       });
 
       if (session.type !== 'course') {
@@ -87,7 +90,7 @@ export const JoinSessionForm = ({ compact, onNavigate }: JoinSessionFormProps) =
         } else {
           window.location.hash = `exam=${session.id}`;
         }
-      }, 800);
+      }, 200);
     } catch (err) {
       console.error(err);
       setMessage({ type: 'error', text: 'Something went wrong' });
@@ -131,7 +134,15 @@ export const JoinSessionForm = ({ compact, onNavigate }: JoinSessionFormProps) =
               placeholder="Enter join code"
               value={joinCode}
               onChange={(e) => {
-                setJoinCode(e.target.value.toUpperCase());
+                // Auto-format with dash: JGBQ2L -> JGB-Q2L
+                let value = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+                if (value.length > 3) {
+                  value = value.slice(0, 3) + '-' + value.slice(3);
+                }
+                if (value.length > 7) {
+                  value = value.slice(0, 7);
+                }
+                setJoinCode(value);
                 setMessage(null);
               }}
               onKeyDown={handleKeyPress}

@@ -28,6 +28,7 @@ import {
   ShieldAlert,
   Monitor,
   X,
+  Grid,
 } from 'lucide-react';
 import { MotionBackground } from '@/components/shared/MotionBackground';
 import {
@@ -65,6 +66,7 @@ export const ExamInterface = ({ onFinish, examContext, assessment }: ExamInterfa
   const [currentTime, setCurrentTime] = useState(() => new Date());
   const [sessionBlock, setSessionBlock] = useState<{ isBlocked: boolean; reason?: string }>({ isBlocked: false });
   const [saveStatus, setSaveStatus] = useState<'saving' | 'saved'>('saved');
+  const [showUnansweredConfirm, setShowUnansweredConfirm] = useState(false);
 
   const [showScreenshotWarning, setShowScreenshotWarning] = useState(false);
 
@@ -96,6 +98,7 @@ export const ExamInterface = ({ onFinish, examContext, assessment }: ExamInterfa
   const lastViolationTimeRef = useRef(0); // Shared cooldown for all violation types
   const fullscreenReenableTimerRef = useRef<number | null>(null);
   const eventsRef = useRef<any[]>([]); // Always-current ref to cheating events
+  const isAwayRef = useRef<boolean>(false);
 
   const user = JSON.parse(localStorage.getItem('user') || 'null');
   const userProfile = JSON.parse(localStorage.getItem('userProfile') || 'null');
@@ -170,11 +173,7 @@ export const ExamInterface = ({ onFinish, examContext, assessment }: ExamInterfa
   const openWarning = useCallback((title: string, message: string) => {
     setWarningTitle(title);
     setWarningMessage(message);
-    setShowWarning((prev) => {
-      if (!prev) return true;
-      window.setTimeout(() => setShowWarning(true), 0);
-      return false;
-    });
+    setShowWarning(true);
   }, []);
 
   const {
@@ -254,6 +253,7 @@ export const ExamInterface = ({ onFinish, examContext, assessment }: ExamInterfa
   } = useCheatingDetector({
     studentId,
     studentName,
+    studentNumber,
     assessment,
     examContext,
     isOnline,
@@ -295,19 +295,26 @@ export const ExamInterface = ({ onFinish, examContext, assessment }: ExamInterfa
     timeLeftRef.current = timeLeft;
   }, [timeLeft]);
 
-  const pendingPenaltyRef = useRef<number>(0);
   const tabLeaveTimeRef = useRef<number | null>(null);
+  const tabTimeoutIdRef = useRef<number | null>(null);
+  const continuousIntervalIdRef = useRef<number | null>(null);
+  const accidentalCountRef = useRef<number>(0);
+  const didTriggerIntentionalRef = useRef<boolean>(false);
+  const lastShortcutTimeRef = useRef<number | null>(null);
+  const activeTabSwitchDocIdRef = useRef<string | null>(null);
+  const isVirtualDesktopRef = useRef<boolean>(false);
 
   // Synchronize student's active exam progress to Firestore in real-time
   const syncActiveExamStatus = useCallback((customStatus?: string) => {
-    if (!studentId || !assessment?.id) return;
-    const docRef = doc(db, 'active_exam_students', `${studentId}_${assessment.id}`);
+    const aid = assessment?.id || examContext?.assessmentId;
+    if (!studentId || !aid) return;
+    const docRef = doc(db, 'active_exam_students', `${studentId}_${aid}`);
     
     const totalQuestions = sessionQuestionsRef.current.length;
     const answersCount = Object.keys(answersRef.current).length;
     const progressPercent = totalQuestions > 0 ? Math.round((answersCount / totalQuestions) * 100) : 0;
     
-    const violationsCount = eventsRef.current.length;
+    const violationsCount = events.length;
     
     let currentStatus = customStatus;
     if (!currentStatus) {
@@ -329,8 +336,8 @@ export const ExamInterface = ({ onFinish, examContext, assessment }: ExamInterfa
       studentId,
       studentName,
       studentNumber,
-      assessmentId: assessment.id,
-      assessmentTitle: assessment.title,
+      assessmentId: aid,
+      assessmentTitle: assessment?.title || examContext?.examTitle || 'Exam',
       courseId: examContext?.assessmentId || assessment?.id || '',
       courseTitle: examContext?.courseTitle || '',
       currentQuestion: currentQuestionIndex + 1,
@@ -354,7 +361,9 @@ export const ExamInterface = ({ onFinish, examContext, assessment }: ExamInterfa
     assessment?.title,
     examContext?.assessmentId,
     examContext?.courseTitle,
+    examContext?.examTitle,
     currentQuestionIndex,
+    events,
   ]);
 
   useEffect(() => {
@@ -382,83 +391,240 @@ export const ExamInterface = ({ onFinish, examContext, assessment }: ExamInterfa
   const handleTabLeave = useCallback(() => {
     if (isExamDisabled || isAutoSubmitted) return;
 
-    const penalty = isQuiz ? 300 : 600;
+    if (isAwayRef.current) return;
+    isAwayRef.current = true;
     tabLeaveTimeRef.current = Date.now();
-    pendingPenaltyRef.current = penalty;
+    didTriggerIntentionalRef.current = false;
 
-    // Apply penalty to local timer immediately
-    deduct(penalty);
-    // Optimistically update ref so the sync call has the correct time
-    timeLeftRef.current = Math.max(0, timeLeftRef.current - penalty);
+    // Check if virtual desktop switch or Task View key shortcut was recently pressed
+    const isRecentShortcut = lastShortcutTimeRef.current && (Date.now() - lastShortcutTimeRef.current < 1500);
+    isVirtualDesktopRef.current = !!isRecentShortcut;
 
-    // Sync state to database immediately as a Violation
-    syncActiveExamStatus('Violation');
-  }, [isExamDisabled, isAutoSubmitted, isQuiz, deduct, syncActiveExamStatus]);
+    // Generate a unique document ID for this tab switch sequence to avoid duplicate entries
+    activeTabSwitchDocIdRef.current = `tab-switch-${studentId}-${assessment?.id || 'exam'}-${Date.now()}`;
 
-  const handleTabDurationSwitch = useCallback(
-    (event: { durationSeconds: number; status: 'Warning' | 'Suspicious' | 'Violation' }) => {
-      const { durationSeconds } = event;
-      const initialPenalty = pendingPenaltyRef.current;
+    // Clear any existing timers/intervals
+    if (tabTimeoutIdRef.current) window.clearTimeout(tabTimeoutIdRef.current);
+    if (continuousIntervalIdRef.current) window.clearInterval(continuousIntervalIdRef.current);
 
-      if (durationSeconds <= 3) {
-        // Refund the penalty since it was within the grace period (accidental or suspicious only)
-        if (initialPenalty > 0) {
-          compensate(initialPenalty);
-          timeLeftRef.current = timeLeftRef.current + initialPenalty;
-          pendingPenaltyRef.current = 0;
-        }
+    const penalty = isQuiz ? 300 : 600;
 
-        // Sync refunded status immediately
-        syncActiveExamStatus();
+    if (isRecentShortcut) {
+      // 1. Task View or Virtual Desktop switcher is immediately treated as Intentional
+      didTriggerIntentionalRef.current = true;
+      deduct(penalty);
+      timeLeftRef.current = Math.max(0, timeLeftRef.current - penalty);
 
-        if (durationSeconds <= 1) {
-          openWarning(
-            'Accidental Activity Detected',
-            'Warning: Tab switching detected. Please remain on the assessment page.'
-          );
-        } else {
-          openWarning(
-            'Suspicious Activity Detected',
-            'Warning: Tab switching detected. Please remain on the assessment page.'
-          );
-        }
-      } else {
-        // Confirmed violation - keep the initial penalty and log it permanently
-        pendingPenaltyRef.current = 0;
+      registerEvent(
+        'Virtual Desktop Switch / Task View',
+        'Student opened Windows Task View or switched virtual desktops.',
+        4, // >3s to ensure intentional classification
+        true, // Already deducted locally
+        activeTabSwitchDocIdRef.current
+      );
+
+      // Sync state as Violation immediately
+      syncActiveExamStatus('Violation');
+
+      // Start continuous penalty interval every 10 seconds while they remain outside
+      continuousIntervalIdRef.current = window.setInterval(() => {
+        deduct(penalty);
+        timeLeftRef.current = Math.max(0, timeLeftRef.current - penalty);
 
         registerEvent(
-          'Tab Switch',
-          `Switched tabs/blurred browser window for ${durationSeconds} second(s).`,
-          durationSeconds,
-          true // Pass true to prevent double deduction
+          'Continuous Tab Switch Penalty',
+          'Remained outside the exam environment (Virtual Desktop / Task View) for another 10 seconds.',
+          10,
+          true,
+          activeTabSwitchDocIdRef.current
         );
 
-        // Deduct extra continuous penalty for remaining away long (every 10 seconds)
-        const continuousIntervals = Math.floor(durationSeconds / 10);
-        if (continuousIntervals > 0) {
-          const continuousPenalty = (isQuiz ? 300 : 600) * continuousIntervals;
-          deduct(continuousPenalty);
-          timeLeftRef.current = Math.max(0, timeLeftRef.current - continuousPenalty);
+        syncActiveExamStatus('Violation');
+      }, 10000);
+
+    } else {
+      // 2. Standard Tab Switch: start 3-second grace classification timer
+      syncActiveExamStatus('Suspicious');
+
+      tabTimeoutIdRef.current = window.setTimeout(() => {
+        didTriggerIntentionalRef.current = true;
+
+        // Apply local timer deduction for Intentional Switch
+        deduct(penalty);
+        timeLeftRef.current = Math.max(0, timeLeftRef.current - penalty);
+
+        // Register intentional switch violation in real-time
+        registerEvent(
+          'Tab Switch',
+          `Switched tabs/blurred browser window for more than 3 seconds.`,
+          4, // duration > 3 seconds
+          true, // We already deducted it locally
+          activeTabSwitchDocIdRef.current
+        );
+
+        // Sync to database immediately as Violation
+        syncActiveExamStatus('Violation');
+
+        // Start continuous penalty interval every 10 seconds while they remain outside
+        continuousIntervalIdRef.current = window.setInterval(() => {
+          deduct(penalty);
+          timeLeftRef.current = Math.max(0, timeLeftRef.current - penalty);
 
           registerEvent(
             'Continuous Tab Switch Penalty',
-            `Remained in another tab/window for ${continuousIntervals * 10}s. Additional continuous deduction applied.`,
-            durationSeconds,
-            false // Deduct this continuous penalty
+            `Remained outside the exam environment for another 10 seconds.`,
+            10,
+            true,
+            activeTabSwitchDocIdRef.current
+          );
+
+          syncActiveExamStatus('Violation');
+        }, 10000);
+
+      }, 3000);
+    }
+
+  }, [isExamDisabled, isAutoSubmitted, isQuiz, studentId, assessment?.id, deduct, registerEvent, syncActiveExamStatus]);
+
+  const handleTabReturn = useCallback(() => {
+    if (!isAwayRef.current) return;
+    isAwayRef.current = false;
+
+    // Clear the timeout and the continuous interval
+    if (tabTimeoutIdRef.current) {
+      window.clearTimeout(tabTimeoutIdRef.current);
+      tabTimeoutIdRef.current = null;
+    }
+    if (continuousIntervalIdRef.current) {
+      window.clearInterval(continuousIntervalIdRef.current);
+      continuousIntervalIdRef.current = null;
+    }
+
+    const durationMs = Date.now() - (tabLeaveTimeRef.current ?? Date.now());
+    const durationSeconds = Math.ceil(durationMs / 1000);
+
+    const penaltyMinutes = isQuiz ? 5 : 10;
+    const penaltySecondsVal = isQuiz ? 300 : 600;
+
+    const docId = activeTabSwitchDocIdRef.current || `tab-switch-${studentId}-${assessment?.id || 'exam'}-${Date.now()}`;
+
+    if (didTriggerIntentionalRef.current) {
+      // The intentional timer had already fired! They got the Intentional Switch penalty of 5/10 minutes
+      // plus any continuous penalties. We update the SAME document with final duration.
+      const eventName = isVirtualDesktopRef.current ? 'Virtual Desktop Switch / Task View' : 'Tab Switch';
+      const eventMsg = isVirtualDesktopRef.current 
+        ? 'Student opened Windows Task View or switched virtual desktops.'
+        : `Switched tabs/blurred browser window for ${durationSeconds} seconds.`;
+
+      registerEvent(
+        eventName,
+        eventMsg,
+        durationSeconds,
+        true, // Already deducted
+        docId
+      );
+
+      const title = isVirtualDesktopRef.current ? 'Virtual Desktop Switch Detected' : 'Intentional Tab Switch Detected';
+      const detailMsg = isVirtualDesktopRef.current
+        ? 'Warning: Windows Task View or Virtual Desktop switching was detected.'
+        : `Warning: You remained outside the exam environment for ${durationSeconds} seconds.`;
+
+      openWarning(
+        title,
+        `${detailMsg}\n${penaltyMinutes} minutes (plus any prolonged absence penalties) were deducted from your remaining time.`
+      );
+      
+      isVirtualDesktopRef.current = false;
+    } else {
+      // Returned within 3 seconds! This is either Accidental (<=1s) or Suspicious (1-3s).
+      // We write/log using the same docId (so it doesn't create duplicate entries).
+      if (durationSeconds <= 1) {
+        accidentalCountRef.current += 1;
+        if (accidentalCountRef.current === 1) {
+          // Accidental Strike 1: warning only, NO deduction!
+          registerEvent('Tab Switch', 'Switched tab briefly (<= 1s). First occurrence: warning only.', durationSeconds, false, docId);
+          
+          openWarning(
+            'Accidental Tab Switch Detected',
+            `Warning: Tab switched briefly (<= 1s).\nFirst Warning: No time was deducted. Please stay inside the exam environment.`
+          );
+        } else {
+          // Accidental Strike >= 2: warning + deduction!
+          deduct(penaltySecondsVal);
+          timeLeftRef.current = Math.max(0, timeLeftRef.current - penaltySecondsVal);
+
+          registerEvent('Tab Switch', 'Switched tab briefly (<= 1s). Repeat occurrence: time deducted.', durationSeconds, true, docId);
+
+          openWarning(
+            'Accidental Tab Switch (Repeat)',
+            `Warning: Repeat accidental tab switch detected.\n${penaltyMinutes} minutes deducted from your remaining time.`
           );
         }
-      }
-    },
-    [compensate, deduct, registerEvent, openWarning, isQuiz, syncActiveExamStatus]
-  );
+      } else {
+        // Suspicious Behavior (1-3 seconds)
+        deduct(penaltySecondsVal);
+        timeLeftRef.current = Math.max(0, timeLeftRef.current - penaltySecondsVal);
 
-  // Tab Exit hook
-  useTabDurationDetector({
-    enabled: tabEnabled,
-    onTabSwitch: handleTabDurationSwitch,
-    onTabLeave: handleTabLeave,
-    sharedLastViolationTimeRef: lastViolationTimeRef,
-  });
+        registerEvent('Tab Switch', 'Switched tab for 1-3 seconds.', durationSeconds, true, docId);
+
+        openWarning(
+          'Suspicious Tab Switch Detected',
+          `Warning: Tab switched for ${durationSeconds} seconds (1-3 seconds range).\n${penaltyMinutes} minutes deducted from your remaining time.`
+        );
+      }
+    }
+
+    activeTabSwitchDocIdRef.current = null;
+    // Sync status back to database
+    syncActiveExamStatus();
+  }, [openWarning, isQuiz, studentId, assessment?.id, registerEvent, deduct, syncActiveExamStatus]);
+
+  // Real-time Tab visibility and focus event listeners
+  useEffect(() => {
+    if (!tabEnabled || isExamDisabled || isAutoSubmitted) return;
+
+    const onVisibilityChange = () => {
+      if (document.hidden) {
+        handleTabLeave();
+      } else {
+        handleTabReturn();
+      }
+    };
+
+    const onWindowBlur = () => {
+      handleTabLeave();
+    };
+
+    const onWindowFocus = () => {
+      handleTabReturn();
+    };
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const isWinTab = e.metaKey && e.key === 'Tab';
+      const isAltTab = e.altKey && e.key === 'Tab';
+      const isVirtualDesktopSwitch = e.ctrlKey && e.metaKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight');
+      const isVirtualDesktopCreate = e.ctrlKey && e.metaKey && e.key.toLowerCase() === 'd';
+
+      if (isWinTab || isAltTab || isVirtualDesktopSwitch || isVirtualDesktopCreate) {
+        lastShortcutTimeRef.current = Date.now();
+        console.log(`[ExamInterface] Task View or Virtual Desktop switch shortcut detected: ${e.key}`);
+      }
+    };
+
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    window.addEventListener('blur', onWindowBlur);
+    window.addEventListener('focus', onWindowFocus);
+    window.addEventListener('keydown', handleKeyDown, true);
+
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      window.removeEventListener('blur', onWindowBlur);
+      window.removeEventListener('focus', onWindowFocus);
+      window.removeEventListener('keydown', handleKeyDown, true);
+      if (tabTimeoutIdRef.current) window.clearTimeout(tabTimeoutIdRef.current);
+      if (continuousIntervalIdRef.current) window.clearInterval(continuousIntervalIdRef.current);
+    };
+  }, [tabEnabled, isExamDisabled, isAutoSubmitted, handleTabLeave, handleTabReturn]);
 
   // Mouse boundary exit hook — only active when cursor monitoring is enabled
   useMouseBoundaryDetector({
@@ -537,7 +703,7 @@ export const ExamInterface = ({ onFinish, examContext, assessment }: ExamInterfa
       try {
         const timeNow = new Date();
         const timeStr = `${String(timeNow.getHours()).padStart(2, '0')}:${String(timeNow.getMinutes()).padStart(2, '0')}:${String(timeNow.getSeconds()).padStart(2, '0')}`;
-        const warningText = `[ProctorTab Security Alert] Screenshot blocked for student "${studentName}" (ID: ${studentNumber}) at ${timeStr}. Unauthorized content distribution is strictly prohibited.`;
+        const warningText = `[ProctorTab Security Alert] Screenshot blocked for student "${studentName}" (ID: ${studentNumber}) at ${timeStr}. Unauthorized content distribution is strictly prohibited`;
         navigator.clipboard.writeText(warningText).catch(() => {});
       } catch (err) {
         console.warn('Could not overwrite clipboard:', err);
@@ -589,6 +755,36 @@ export const ExamInterface = ({ onFinish, examContext, assessment }: ExamInterfa
       window.removeEventListener('keyup', handleKeyUp);
     };
   }, [screenshotEnabled, studentName, studentNumber, registerEvent, triggerWatermarkProminent, setShowScreenshotWarning]);
+
+  // Lock clipboard content to the security alert text during user activity / window state changes
+  useEffect(() => {
+    if (!screenshotEnabled) return;
+
+    const overwriteClipboardWithSecurityAlert = () => {
+      try {
+        const timeNow = new Date();
+        const timeStr = `${String(timeNow.getHours()).padStart(2, '0')}:${String(timeNow.getMinutes()).padStart(2, '0')}:${String(timeNow.getSeconds()).padStart(2, '0')}`;
+        const warningText = `[ProctorTab Security Alert] Screenshot blocked for student "${studentName}" (ID: ${studentNumber}) at ${timeStr}. Unauthorized content distribution is strictly prohibited`;
+        navigator.clipboard.writeText(warningText).catch(() => {});
+      } catch (err) {
+        // Ignore clipboard write failures when document lacks focus
+      }
+    };
+
+    // Run once initially
+    overwriteClipboardWithSecurityAlert();
+
+    const eventsToHook = ['click', 'keydown', 'copy', 'focus', 'blur', 'visibilitychange'];
+    eventsToHook.forEach((evt) => {
+      window.addEventListener(evt, overwriteClipboardWithSecurityAlert, { passive: true });
+    });
+
+    return () => {
+      eventsToHook.forEach((evt) => {
+        window.removeEventListener(evt, overwriteClipboardWithSecurityAlert);
+      });
+    };
+  }, [screenshotEnabled, studentName, studentNumber]);
 
   // Fullscreen constraint handler
   useEffect(() => {
@@ -688,9 +884,18 @@ export const ExamInterface = ({ onFinish, examContext, assessment }: ExamInterfa
 
   const handleSubmit = () => {
     if (isExamDisabled) return;
-    if (confirm('Are you sure you want to submit your assessment?')) {
-      void clearRtdbAlert();
-      onFinish({ answers, sessionQuestions, violations: events });
+
+    const skippedQuestionsIndices = sessionQuestions
+      .map((q, idx) => (answers[q.id] == null || answers[q.id] === '' ? idx : null))
+      .filter((idx): idx is number => idx !== null);
+
+    if (skippedQuestionsIndices.length > 0) {
+      setShowUnansweredConfirm(true);
+    } else {
+      if (confirm('Are you sure you want to submit your assessment?')) {
+        void clearRtdbAlert();
+        onFinish({ answers, sessionQuestions, violations: events });
+      }
     }
   };
 
@@ -893,6 +1098,54 @@ export const ExamInterface = ({ onFinish, examContext, assessment }: ExamInterfa
             </div>
           </div>
 
+          {/* ═══ QUESTION NAVIGATOR MAP ═══ */}
+          <div
+            className="w-full rounded-3xl border border-white/10 overflow-hidden shadow-[0_8px_32px_rgba(0,0,0,0.4)] backdrop-blur-xl hover:border-cyan-500/20 transition-all duration-300 p-5"
+            style={{ background: 'linear-gradient(135deg, rgba(2, 2, 8, 0.5) 0%, rgba(2, 2, 8, 0.75) 100%)' }}
+          >
+            <div className="flex items-center justify-between mb-3 px-1">
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
+                <Grid className="w-3.5 h-3.5 text-cyan-400" />
+                Question Map (Highlights Unanswered)
+              </span>
+              <div className="flex gap-3 text-[9px] font-bold text-slate-500">
+                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" /> Current</span>
+                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500" /> Answered</span>
+                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full border border-rose-500 bg-rose-950/20" /> Unanswered</span>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {sessionQuestions.map((q, idx) => {
+                const isCurrent = idx === currentQuestionIndex;
+                const isAnswered = answers[q.id] != null && answers[q.id] !== '';
+                const isFlagged = flaggedQuestions[idx];
+                
+                let btnStyle = 'border-white/10 text-slate-400 hover:border-white/20 hover:text-white bg-white/[0.02]';
+                if (isCurrent) {
+                  btnStyle = 'border-cyan-500/60 text-white bg-cyan-500/20 shadow-[0_0_12px_rgba(6,182,212,0.3)] font-black scale-[1.05]';
+                } else if (isAnswered) {
+                  btnStyle = 'border-emerald-500/30 text-emerald-400 bg-emerald-500/5 hover:bg-emerald-500/10 hover:text-emerald-300';
+                } else {
+                  btnStyle = 'border-rose-500/40 text-rose-400 bg-rose-950/20 shadow-[0_0_8px_rgba(239,68,68,0.08)] hover:bg-rose-950/30';
+                }
+
+                return (
+                  <button
+                    key={q.id}
+                    onClick={() => handleNavigateToQuestion(idx)}
+                    disabled={isExamDisabled}
+                    className={`relative w-8 h-8 rounded-lg flex items-center justify-center text-xs font-semibold transition-all ${btnStyle}`}
+                  >
+                    {idx + 1}
+                    {isFlagged && (
+                      <span className="absolute -top-1 -right-1 w-2 h-2 bg-amber-500 rounded-full animate-pulse" />
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
           {/* ═══ QUESTION CARD ═══ */}
           <div
             className="w-full rounded-3xl border border-white/10 overflow-hidden shadow-[0_8px_32px_rgba(0,0,0,0.47)] backdrop-blur-xl hover:border-indigo-500/20 transition-all duration-300 animate-in fade-in slide-in-from-bottom-4 duration-300"
@@ -996,6 +1249,53 @@ export const ExamInterface = ({ onFinish, examContext, assessment }: ExamInterfa
 
         </div>
       </div>
+
+      {/* Unanswered confirmation modal */}
+      {showUnansweredConfirm && (
+        <div className="fixed inset-0 z-[99999] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-slate-950/85 backdrop-blur-md" />
+          <div className="relative w-full max-w-md bg-slate-900 border border-slate-700/50 rounded-[2rem] p-8 shadow-[0_0_50px_rgba(59,130,246,0.15)] text-white text-center">
+            <div className="flex items-center justify-center mb-4">
+              <div className="p-4 bg-yellow-500/10 rounded-full border border-yellow-500/20 animate-pulse">
+                <AlertTriangle className="w-12 h-12 text-yellow-500" />
+              </div>
+            </div>
+            <h3 className="text-xl font-black text-yellow-500 uppercase tracking-wider mb-2">
+              Unanswered Questions
+            </h3>
+            <p className="text-slate-300 text-sm mb-6 leading-relaxed font-semibold">
+              You have <span className="font-black text-yellow-400">{unansweredCount}</span> unanswered question(s). 
+              Skipped items must be resolved or confirmed.
+            </p>
+            <div className="flex flex-col gap-3">
+              <button
+                onClick={() => {
+                  setShowUnansweredConfirm(false);
+                  const skippedQuestionsIndices = sessionQuestions
+                    .map((q, idx) => (answers[q.id] == null || answers[q.id] === '' ? idx : null))
+                    .filter((idx): idx is number => idx !== null);
+                  if (skippedQuestionsIndices.length > 0) {
+                    setCurrentQuestionIndex(skippedQuestionsIndices[0]);
+                  }
+                }}
+                className="w-full py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-black rounded-xl shadow-[0_4px_20px_rgba(59,130,246,0.3)] transition-all transform hover:scale-[1.02] active:scale-[0.98] uppercase tracking-wider text-xs"
+              >
+                Return to Questions
+              </button>
+              <button
+                onClick={() => {
+                  setShowUnansweredConfirm(false);
+                  void clearRtdbAlert();
+                  onFinish({ answers, sessionQuestions, violations: events });
+                }}
+                className="w-full py-3 bg-slate-800 hover:bg-slate-750 text-slate-300 hover:text-white font-black rounded-xl border border-white/5 transition-all transform hover:scale-[1.02] active:scale-[0.98] uppercase tracking-wider text-xs"
+              >
+                Submit Anyway
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Proctor warning modal */}
       <WarningModal

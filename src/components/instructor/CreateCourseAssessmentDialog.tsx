@@ -3,7 +3,7 @@ import {
   BookOpen, Loader, Shield, Clock, HelpCircle,
   Eye, ChevronDown, ChevronUp, Sparkles, Lock, RotateCcw,
   ListChecks, Zap, ScanEye, Copy, MonitorOff,
-  Camera, BellRing, ArrowLeft, FilePen
+  Camera, BellRing, ArrowLeft, FilePen, Calendar
 } from 'lucide-react';
 import {
   Dialog,
@@ -834,12 +834,15 @@ export function CreateCourseAssessmentDialog({
                 </div>
                 <div className="min-w-0">
                   <FieldLabel>Due Date</FieldLabel>
-                  <Input
-                    type="datetime-local"
-                    value={dueDate}
-                    onChange={(e) => setDueDate(e.target.value)}
-                    className="h-12 text-xs border-white/[0.07] rounded-lg text-slate-200 focus-visible:ring-violet-500 w-full px-4"
-                  />
+                  <div className="relative">
+                    <Input
+                      type="datetime-local"
+                      value={dueDate}
+                      onChange={(e) => setDueDate(e.target.value)}
+                      className="h-12 text-xs border-white/[0.07] rounded-lg text-slate-200 focus-visible:ring-violet-500 w-full px-4 pr-10"
+                    />
+                    <Calendar className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 pointer-events-none" />
+                  </div>
                 </div>
               </div>
               <div className="w-full">
@@ -1069,6 +1072,23 @@ export function CreateCourseAssessmentDialog({
           {/* ── SECTION 4: Advanced Security ── */}
           <Section step={4} title="Advanced Security" subtitle="Detector overrides and navigation restrictions" icon={Shield}>
             <div className="space-y-2 w-full">
+              {/* Select All Button */}
+              <button
+                type="button"
+                onClick={() => {
+                  const allEnabled = overrideCopyPaste && overrideTab && overrideFullscreen && overrideScreenshot && overrideAlarm;
+                  setOverrideCopyPaste(!allEnabled);
+                  setOverrideTab(!allEnabled);
+                  setOverrideFullscreen(!allEnabled);
+                  setOverrideScreenshot(!allEnabled);
+                  setOverrideAlarm(!allEnabled);
+                }}
+                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-violet-500/10 border border-violet-500/20 rounded-lg text-violet-400 text-xs font-semibold hover:bg-violet-500/20 transition-colors"
+              >
+                <Zap className="w-3.5 h-3.5" />
+                {overrideCopyPaste && overrideTab && overrideFullscreen && overrideScreenshot && overrideAlarm ? 'Deselect All Detectors' : 'Select All Detectors'}
+              </button>
+
               {[
                 { id: 'det-copy', icon: Copy, label: 'Copy / Paste Protection', desc: 'Prevent copying content during the exam', checked: overrideCopyPaste, onChange: setOverrideCopyPaste },
                 { id: 'det-tab', icon: ArrowLeft, label: 'Tab Switch Detection', desc: 'Detect if students switch tabs or windows', checked: overrideTab, onChange: setOverrideTab },
