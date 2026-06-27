@@ -224,6 +224,31 @@ export const useCheatingDetector = ({
 
       const autoSubmittedFlag = newSeverity === 'Confirmed Violation';
 
+      // Calculate specific time deduction (penalty) based on cheating event type and assessment type
+      let penaltySeconds = 0;
+      const lowerEvent = eventType.toLowerCase();
+      const lowerRaw = rawType.toLowerCase();
+
+      if (eventType === 'Accidental Tab Switch') {
+        penaltySeconds = isQuiz ? 60 : 120; // 1 min for quiz, 2 mins for exam
+      } else if (eventType === 'Suspicious Tab Switch') {
+        penaltySeconds = isQuiz ? 180 : 300; // 3 mins for quiz, 5 mins for exam
+      } else if (eventType === 'Intentional Tab Switch') {
+        penaltySeconds = isQuiz ? 300 : 600; // 5 mins for quiz, 10 mins for exam
+      } else if (lowerEvent.includes('fullscreen') || lowerRaw.includes('fullscreen')) {
+        penaltySeconds = isQuiz ? 300 : 600; // 5 mins for quiz, 10 mins for exam
+      } else if (lowerEvent.includes('mouse') || lowerRaw.includes('mouse')) {
+        penaltySeconds = isQuiz ? 60 : 180; // 1 min for quiz, 3 mins for exam
+      } else if (lowerEvent.includes('copy') || lowerEvent.includes('paste') || lowerRaw.includes('clipboard') || lowerRaw.includes('copy') || lowerRaw.includes('paste')) {
+        penaltySeconds = isQuiz ? 120 : 300; // 2 mins for quiz, 5 mins for exam
+      } else if (lowerEvent.includes('screenshot') || lowerEvent.includes('printscreen') || lowerRaw.includes('screenshot') || lowerRaw.includes('printscreen') || lowerRaw.includes('snip')) {
+        penaltySeconds = isQuiz ? 300 : 600; // 5 mins for quiz, 10 mins for exam
+      } else if (lowerEvent.includes('shortcut') || lowerEvent.includes('keyboard') || lowerRaw.includes('shortcut') || lowerRaw.includes('keyboard')) {
+        penaltySeconds = isQuiz ? 120 : 300; // 2 mins for quiz, 5 mins for exam
+      } else {
+        penaltySeconds = isQuiz ? 120 : 300; // default fallback: 2 mins for quiz, 5 mins for exam
+      }
+
       // Log detailed violation data to Firestore
       try {
         const payload = {
@@ -253,12 +278,11 @@ export const useCheatingDetector = ({
           ...payload,
           userId: studentId,
           violationType: eventType.toLowerCase().replace(/\s+/g, '_'),
-          deductedMinutes: isQuiz ? 5 : 10,
+          deductedMinutes: Number((penaltySeconds / 60).toFixed(2)),
         });
 
         // Write to Firebase Realtime Database for ESP32 board
         let rtdbEvent = '';
-        const lowerRaw = rawType.toLowerCase();
         if (lowerRaw.includes('tab')) {
           const tabSwitchesCount = updatedEvents.filter(e =>
             e.type.toLowerCase().includes('tab')
@@ -294,8 +318,13 @@ export const useCheatingDetector = ({
         autoSubmittedRef.current = true;
         onAutoSubmit();
       } else if (!isIntentionalTabAlreadyHandled) {
-        const penaltySeconds = isQuiz ? 300 : 600;
-        const warningMsg = `Warning: ${eventType} detected. ${isQuiz ? '5 minutes' : '10 minutes'} deducted from your timer. Please focus strictly on the exam window.`;
+        const minutes = Math.floor(penaltySeconds / 60);
+        const seconds = penaltySeconds % 60;
+        const timeDeductedStr = minutes > 0 
+          ? `${minutes} minute${minutes > 1 ? 's' : ''}${seconds > 0 ? ` and ${seconds} seconds` : ''}`
+          : `${seconds} second${seconds > 1 ? 's' : ''}`;
+
+        const warningMsg = `Warning: ${eventType} detected. ${timeDeductedStr} deducted from your timer. Please focus strictly on the exam window.`;
         onWarning(eventType, warningMsg, penaltySeconds);
       }
     },
