@@ -316,9 +316,13 @@ export const useCheatingDetector = ({
       // Arduino ESP32 RTDB alert
       let rtdbEvent = '';
       if (isTabEvent) {
-        if (newCount === 1) rtdbEvent = 'tab_switch_1';
-        else if (newCount === 2) rtdbEvent = 'tab_switch_2';
-        else rtdbEvent = 'tab_switch_3';
+        if (behaviorClassification === 'Accidental') {
+          rtdbEvent = 'tab_switch_1';
+        } else if (behaviorClassification === 'Suspicious') {
+          rtdbEvent = 'tab_switch_2';
+        } else if (behaviorClassification === 'Intentional') {
+          rtdbEvent = 'tab_switch_3';
+        }
       } else if (lowerRaw.includes('screenshot') || lowerRaw.includes('printscreen') || lowerRaw.includes('snip')) {
         rtdbEvent = 'screen_shot';
       } else if (lowerRaw.includes('mouse')) {
